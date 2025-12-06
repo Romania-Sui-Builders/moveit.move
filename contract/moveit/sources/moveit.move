@@ -27,6 +27,7 @@ const ECannotRemoveLastStatus: u64 = 5;
 const ENoStatusesDefined: u64 = 6;
 const EWrongVersion: u64 = 7;
 const ENotUpgraded: u64 = 8;
+const EInvalidDueDate: u64 = 9;
 
 // ===== One-Time Witness =====
 
@@ -585,6 +586,9 @@ fun create_task_internal(
     
     let now = clock.timestamp_ms();
     
+    // Validate due_date: must be 0 (no due date) or in the future
+    assert!(due_date == 0 || due_date > now, EInvalidDueDate);
+    
     // New tasks start with the first status in the workflow
     let initial_status = *board.statuses.borrow(0);
     
@@ -628,12 +632,17 @@ fun update_task_internal(
     let board_id = object::id(board);
     assert!(board.tasks.contains(task_id), ETaskNotFound);
     
+    let now = clock.timestamp_ms();
+    
+    // Validate due_date: must be 0 (no due date) or in the future
+    assert!(due_date == 0 || due_date > now, EInvalidDueDate);
+    
     let task = board.tasks.borrow_mut(task_id);
     task.title = title;
     task.description = description;
     task.due_date = due_date;
     task.effort = effort;
-    task.updated_at = clock.timestamp_ms();
+    task.updated_at = now;
     
     event::emit(TaskUpdated {
         board_id,
