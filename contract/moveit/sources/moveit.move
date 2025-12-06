@@ -1,7 +1,8 @@
 /// MoveIt - On-Chain Coordination & Work Management System
 /// 
 /// A decentralized task and project management system built on Sui.
-/// Supports boards with role-based access control and full task lifecycle management.
+/// Supports boards with configurable workflows, role-based access control, 
+/// and full task lifecycle management.
 module moveit::moveit;
 
 use std::string::String;
@@ -13,13 +14,10 @@ use sui::clock::Clock;
 const EInvalidBoardId: u64 = 0;
 const EInvalidStatus: u64 = 1;
 const ETaskNotFound: u64 = 2;
-
-// ===== Task Status Constants =====
-const STATUS_OPEN: u8 = 0;
-const STATUS_IN_PROGRESS: u8 = 1;
-const STATUS_IN_REVIEW: u8 = 2;
-const STATUS_DONE: u8 = 3;
-const STATUS_CANCELLED: u8 = 4;
+const EStatusAlreadyExists: u64 = 3;
+const EStatusNotFound: u64 = 4;
+const ECannotRemoveLastStatus: u64 = 5;
+const ENoStatusesDefined: u64 = 6;
 
 // ===== Core Structs =====
 
@@ -30,12 +28,15 @@ public struct AdminCap has key, store {
 }
 
 /// Board represents a workspace for organizing tasks and team members.
+/// Each board has its own configurable workflow (statuses).
 public struct Board has key, store {
     id: UID,
     /// Board name
     name: String,
     /// Optional description of the board
     description: String,
+    /// Configurable workflow statuses for this board (e.g., "To-Do", "In-Progress", "Done")
+    statuses: vector<String>,
     /// Counter for generating unique task IDs within the board
     task_counter: u64,
     /// All tasks in this board (task_id -> Task)
@@ -54,8 +55,8 @@ public struct Task has store {
     description: String,
     /// Optional due date as Unix timestamp (milliseconds)
     due_date: u64,
-    /// Current status of the task
-    status: u8,
+    /// Current status of the task (must be one of the board's configured statuses)
+    status: String,
     /// Effort estimation (e.g., story points or hours)
     effort: u64,
     /// List of assigned user addresses
@@ -82,6 +83,18 @@ public struct BoardCreated has copy, drop {
     board_id: ID,
     name: String,
     created_by: address,
+}
+
+public struct StatusAdded has copy, drop {
+    board_id: ID,
+    status: String,
+    added_by: address,
+}
+
+public struct StatusRemoved has copy, drop {
+    board_id: ID,
+    status: String,
+    removed_by: address,
 }
 
 public struct ContributorAdded has copy, drop {
@@ -112,8 +125,8 @@ public struct TaskUpdated has copy, drop {
 public struct TaskStatusChanged has copy, drop {
     board_id: ID,
     task_id: u64,
-    old_status: u8,
-    new_status: u8,
+    old_status: String,
+    new_status: String,
     changed_by: address,
 }
 
@@ -137,20 +150,24 @@ fun init(ctx: &mut TxContext) {
 
 // ===== Admin Functions (Board Management) =====
 
-/// Create a new board (admin only).
+/// Create a new board with initial statuses (admin only).
+/// The `initial_statuses` vector defines the workflow for this board.
 public fun create_board(
     _: &AdminCap,
     name: String,
     description: String,
+    initial_statuses: vector<String>,
     clock: &Clock,
     ctx: &mut TxContext,
 ): ID {
     let sender = ctx.sender();
+    assert!(!initial_statuses.is_empty(), ENoStatusesDefined);
     
     let board = Board {
         id: object::new(ctx),
         name,
         description,
+        statuses: initial_statuses,
         task_counter: 0,
         tasks: table::new<u64, Task>(ctx),
         created_at: clock.timestamp_ms(),
@@ -178,6 +195,48 @@ public fun update_board(
 ) {
     board.name = name;
     board.description = description;
+}
+
+/// Add a new status to the board's workflow (admin only)
+public fun add_status(
+    _: &AdminCap,
+    board: &mut Board,
+    status: String,
+    ctx: &TxContext,
+) {
+    let sender = ctx.sender();
+    assert!(!vector_contains_string(&board.statuses, &status), EStatusAlreadyExists);
+    
+    board.statuses.push_back(status);
+    
+    event::emit(StatusAdded {
+        board_id: object::id(board),
+        status: *board.statuses.borrow(board.statuses.length() - 1),
+        added_by: sender,
+    });
+}
+
+/// Remove a status from the board's workflow (admin only)
+/// Note: Tasks with this status will need to be updated manually
+public fun remove_status(
+    _: &AdminCap,
+    board: &mut Board,
+    status: String,
+    ctx: &TxContext,
+) {
+    let sender = ctx.sender();
+    assert!(board.statuses.length() > 1, ECannotRemoveLastStatus);
+    
+    let (found, index) = vector_index_of_string(&board.statuses, &status);
+    assert!(found, EStatusNotFound);
+    
+    board.statuses.remove(index);
+    
+    event::emit(StatusRemoved {
+        board_id: object::id(board),
+        status,
+        removed_by: sender,
+    });
 }
 
 /// Add a contributor to a board (admin only).
@@ -227,7 +286,7 @@ public fun burn_contributor_cap(cap: ContributorCap) {
 
 // ===== Task Functions (Admin) =====
 
-/// Create a new task (admin)
+/// Create a new task (admin). Task starts with the first status in the workflow.
 public fun create_task_as_admin(
     _: &AdminCap,
     board: &mut Board,
@@ -262,7 +321,7 @@ public fun update_task_status_as_admin(
     _: &AdminCap,
     board: &mut Board,
     task_id: u64,
-    new_status: u8,
+    new_status: String,
     clock: &Clock,
     ctx: &TxContext,
 ) {
@@ -283,7 +342,7 @@ public fun assign_task_as_admin(
 
 // ===== Task Functions (Contributor) =====
 
-/// Create a new task (contributor)
+/// Create a new task (contributor). Task starts with the first status in the workflow.
 public fun create_task_as_contributor(
     cap: &ContributorCap,
     board: &mut Board,
@@ -320,7 +379,7 @@ public fun update_task_status_as_contributor(
     cap: &ContributorCap,
     board: &mut Board,
     task_id: u64,
-    new_status: u8,
+    new_status: String,
     clock: &Clock,
     ctx: &TxContext,
 ) {
@@ -348,13 +407,23 @@ public fun get_board_info(board: &Board): (String, String, u64, u64) {
     (board.name, board.description, board.task_counter, board.created_at)
 }
 
+/// Get the board's configured statuses (workflow)
+public fun get_board_statuses(board: &Board): vector<String> {
+    board.statuses
+}
+
+/// Check if a status is valid for the board
+public fun is_valid_status(board: &Board, status: &String): bool {
+    vector_contains_string(&board.statuses, status)
+}
+
 /// Check if a task exists
 public fun task_exists(board: &Board, task_id: u64): bool {
     board.tasks.contains(task_id)
 }
 
 /// Get task info
-public fun get_task_info(board: &Board, task_id: u64): (String, String, u64, u8, u64, vector<address>, address, u64, u64) {
+public fun get_task_info(board: &Board, task_id: u64): (String, String, u64, String, u64, vector<address>, address, u64, u64) {
     assert!(board.tasks.contains(task_id), ETaskNotFound);
     let task = board.tasks.borrow(task_id);
     (
@@ -385,14 +454,6 @@ public fun is_valid_contributor_cap(board: &Board, cap: &ContributorCap): bool {
     cap.board_id == object::id(board)
 }
 
-// ===== Status Constants Accessors =====
-
-public fun status_open(): u8 { STATUS_OPEN }
-public fun status_in_progress(): u8 { STATUS_IN_PROGRESS }
-public fun status_in_review(): u8 { STATUS_IN_REVIEW }
-public fun status_done(): u8 { STATUS_DONE }
-public fun status_cancelled(): u8 { STATUS_CANCELLED }
-
 // ===== Internal Helper Functions =====
 
 /// Internal function to create a task
@@ -407,18 +468,22 @@ fun create_task_internal(
     ctx: &TxContext,
 ): u64 {
     let sender = ctx.sender();
+    assert!(!board.statuses.is_empty(), ENoStatusesDefined);
     
     let task_id = board.task_counter;
     board.task_counter = task_id + 1;
     
     let now = clock.timestamp_ms();
     
+    // New tasks start with the first status in the workflow
+    let initial_status = *board.statuses.borrow(0);
+    
     let task = Task {
         task_id,
         title,
         description,
         due_date,
-        status: STATUS_OPEN,
+        status: initial_status,
         effort,
         assignees,
         creator: sender,
@@ -450,6 +515,7 @@ fun update_task_internal(
     ctx: &TxContext,
 ) {
     let sender = ctx.sender();
+    let board_id = object::id(board);
     assert!(board.tasks.contains(task_id), ETaskNotFound);
     
     let task = board.tasks.borrow_mut(task_id);
@@ -460,7 +526,7 @@ fun update_task_internal(
     task.updated_at = clock.timestamp_ms();
     
     event::emit(TaskUpdated {
-        board_id: object::id(board),
+        board_id,
         task_id,
         updated_by: sender,
     });
@@ -470,13 +536,14 @@ fun update_task_internal(
 fun update_task_status_internal(
     board: &mut Board,
     task_id: u64,
-    new_status: u8,
+    new_status: String,
     clock: &Clock,
     ctx: &TxContext,
 ) {
     let sender = ctx.sender();
+    let board_id = object::id(board);
     assert!(board.tasks.contains(task_id), ETaskNotFound);
-    assert!(is_valid_status(new_status), EInvalidStatus);
+    assert!(vector_contains_string(&board.statuses, &new_status), EInvalidStatus);
     
     let task = board.tasks.borrow_mut(task_id);
     let old_status = task.status;
@@ -484,10 +551,10 @@ fun update_task_status_internal(
     task.updated_at = clock.timestamp_ms();
     
     event::emit(TaskStatusChanged {
-        board_id: object::id(board),
+        board_id,
         task_id,
         old_status,
-        new_status,
+        new_status: task.status,
         changed_by: sender,
     });
 }
@@ -501,6 +568,7 @@ fun assign_task_internal(
     ctx: &TxContext,
 ) {
     let sender = ctx.sender();
+    let board_id = object::id(board);
     assert!(board.tasks.contains(task_id), ETaskNotFound);
     
     let task = board.tasks.borrow_mut(task_id);
@@ -508,20 +576,37 @@ fun assign_task_internal(
     task.updated_at = clock.timestamp_ms();
     
     event::emit(TaskAssigned {
-        board_id: object::id(board),
+        board_id,
         task_id,
-        assignees,
+        assignees: task.assignees,
         assigned_by: sender,
     });
 }
 
-/// Validate task status
-fun is_valid_status(status: u8): bool {
-    status == STATUS_OPEN || 
-    status == STATUS_IN_PROGRESS || 
-    status == STATUS_IN_REVIEW || 
-    status == STATUS_DONE || 
-    status == STATUS_CANCELLED
+/// Check if a vector contains a string
+fun vector_contains_string(vec: &vector<String>, value: &String): bool {
+    let len = vec.length();
+    let mut i = 0;
+    while (i < len) {
+        if (vec.borrow(i) == value) {
+            return true
+        };
+        i = i + 1;
+    };
+    false
+}
+
+/// Find the index of a string in a vector
+fun vector_index_of_string(vec: &vector<String>, value: &String): (bool, u64) {
+    let len = vec.length();
+    let mut i = 0;
+    while (i < len) {
+        if (vec.borrow(i) == value) {
+            return (true, i)
+        };
+        i = i + 1;
+    };
+    (false, 0)
 }
 
 // ===== Test-only Functions =====

@@ -10,6 +10,8 @@ use moveit::moveit::{
     add_contributor,
     remove_contributor,
     update_board,
+    add_status,
+    remove_status,
     create_task_as_admin,
     create_task_as_contributor,
     update_task_as_admin,
@@ -18,19 +20,18 @@ use moveit::moveit::{
     assign_task_as_admin,
     burn_contributor_cap,
     get_board_info,
+    get_board_statuses,
     get_task_info,
     get_task_count,
     get_contributor_cap_board_id,
     is_valid_contributor_cap,
+    is_valid_status,
     task_exists,
-    status_open,
-    status_in_progress,
-    status_done,
     create_admin_cap_for_testing,
 };
 use sui::test_scenario::{Self as ts, Scenario};
 use sui::clock::{Self, Clock};
-use std::string;
+use std::string::{Self, String};
 
 // Test addresses
 const ADMIN: address = @0xA;
@@ -48,6 +49,14 @@ fun create_test_clock(scenario: &mut Scenario): Clock {
     clock::create_for_testing(ts::ctx(scenario))
 }
 
+fun default_statuses(): vector<String> {
+    vector[
+        string::utf8(b"To-Do"),
+        string::utf8(b"In-Progress"),
+        string::utf8(b"Done")
+    ]
+}
+
 // ===== Board Creation Tests =====
 
 #[test]
@@ -63,6 +72,7 @@ fun test_admin_create_board() {
             &admin_cap,
             string::utf8(b"Test Board"),
             string::utf8(b"A test board description"),
+            default_statuses(),
             &clock,
             ts::ctx(&mut scenario)
         );
@@ -80,6 +90,157 @@ fun test_admin_create_board() {
         assert!(description == string::utf8(b"A test board description"));
         assert!(task_count == 0);
         
+        // Verify statuses
+        let statuses = get_board_statuses(&board);
+        assert!(statuses.length() == 3);
+        assert!(is_valid_status(&board, &string::utf8(b"To-Do")));
+        assert!(is_valid_status(&board, &string::utf8(b"In-Progress")));
+        assert!(is_valid_status(&board, &string::utf8(b"Done")));
+        
+        ts::return_shared(board);
+    };
+    
+    clock.destroy_for_testing();
+    ts::end(scenario);
+}
+
+#[test]
+fun test_custom_workflow() {
+    let mut scenario = setup_test();
+    let clock = create_test_clock(&mut scenario);
+    
+    // Create board with custom statuses
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let admin_cap = create_admin_cap_for_testing(ts::ctx(&mut scenario));
+        
+        let custom_statuses = vector[
+            string::utf8(b"Blocked"),
+            string::utf8(b"Backlog"),
+            string::utf8(b"In-Progress"),
+            string::utf8(b"Review"),
+            string::utf8(b"Completed")
+        ];
+        
+        create_board(
+            &admin_cap,
+            string::utf8(b"Custom Workflow Board"),
+            string::utf8(b""),
+            custom_statuses,
+            &clock,
+            ts::ctx(&mut scenario)
+        );
+        
+        transfer::public_transfer(admin_cap, ADMIN);
+    };
+    
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let board = ts::take_shared<Board>(&scenario);
+        
+        // Verify custom statuses
+        let statuses = get_board_statuses(&board);
+        assert!(statuses.length() == 5);
+        assert!(is_valid_status(&board, &string::utf8(b"Blocked")));
+        assert!(is_valid_status(&board, &string::utf8(b"Backlog")));
+        assert!(is_valid_status(&board, &string::utf8(b"Review")));
+        assert!(is_valid_status(&board, &string::utf8(b"Completed")));
+        
+        ts::return_shared(board);
+    };
+    
+    clock.destroy_for_testing();
+    ts::end(scenario);
+}
+
+#[test]
+fun test_add_status() {
+    let mut scenario = setup_test();
+    let clock = create_test_clock(&mut scenario);
+    
+    // Create board
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let admin_cap = create_admin_cap_for_testing(ts::ctx(&mut scenario));
+        create_board(&admin_cap, string::utf8(b"Board"), string::utf8(b""), default_statuses(), &clock, ts::ctx(&mut scenario));
+        transfer::public_transfer(admin_cap, ADMIN);
+    };
+    
+    // Add new status
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let mut board = ts::take_shared<Board>(&scenario);
+        let admin_cap = ts::take_from_sender<AdminCap>(&scenario);
+        
+        add_status(&admin_cap, &mut board, string::utf8(b"Blocked"), ts::ctx(&mut scenario));
+        
+        let statuses = get_board_statuses(&board);
+        assert!(statuses.length() == 4);
+        assert!(is_valid_status(&board, &string::utf8(b"Blocked")));
+        
+        ts::return_to_sender(&scenario, admin_cap);
+        ts::return_shared(board);
+    };
+    
+    clock.destroy_for_testing();
+    ts::end(scenario);
+}
+
+#[test]
+fun test_remove_status() {
+    let mut scenario = setup_test();
+    let clock = create_test_clock(&mut scenario);
+    
+    // Create board
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let admin_cap = create_admin_cap_for_testing(ts::ctx(&mut scenario));
+        create_board(&admin_cap, string::utf8(b"Board"), string::utf8(b""), default_statuses(), &clock, ts::ctx(&mut scenario));
+        transfer::public_transfer(admin_cap, ADMIN);
+    };
+    
+    // Remove status
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let mut board = ts::take_shared<Board>(&scenario);
+        let admin_cap = ts::take_from_sender<AdminCap>(&scenario);
+        
+        remove_status(&admin_cap, &mut board, string::utf8(b"In-Progress"), ts::ctx(&mut scenario));
+        
+        let statuses = get_board_statuses(&board);
+        assert!(statuses.length() == 2);
+        assert!(!is_valid_status(&board, &string::utf8(b"In-Progress")));
+        
+        ts::return_to_sender(&scenario, admin_cap);
+        ts::return_shared(board);
+    };
+    
+    clock.destroy_for_testing();
+    ts::end(scenario);
+}
+
+#[test, expected_failure(abort_code = moveit::ECannotRemoveLastStatus)]
+fun test_cannot_remove_last_status() {
+    let mut scenario = setup_test();
+    let clock = create_test_clock(&mut scenario);
+    
+    // Create board with single status
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let admin_cap = create_admin_cap_for_testing(ts::ctx(&mut scenario));
+        create_board(&admin_cap, string::utf8(b"Board"), string::utf8(b""), vector[string::utf8(b"Only-Status")], &clock, ts::ctx(&mut scenario));
+        transfer::public_transfer(admin_cap, ADMIN);
+    };
+    
+    // Try to remove the only status - should fail
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let mut board = ts::take_shared<Board>(&scenario);
+        let admin_cap = ts::take_from_sender<AdminCap>(&scenario);
+        
+        remove_status(&admin_cap, &mut board, string::utf8(b"Only-Status"), ts::ctx(&mut scenario));
+        
+        ts::return_to_sender(&scenario, admin_cap);
         ts::return_shared(board);
     };
     
@@ -98,7 +259,7 @@ fun test_add_contributor() {
     ts::next_tx(&mut scenario, ADMIN);
     {
         let admin_cap = create_admin_cap_for_testing(ts::ctx(&mut scenario));
-        create_board(&admin_cap, string::utf8(b"Team Board"), string::utf8(b""), &clock, ts::ctx(&mut scenario));
+        create_board(&admin_cap, string::utf8(b"Team Board"), string::utf8(b""), default_statuses(), &clock, ts::ctx(&mut scenario));
         transfer::public_transfer(admin_cap, ADMIN);
     };
     
@@ -136,7 +297,7 @@ fun test_remove_contributor_event() {
     ts::next_tx(&mut scenario, ADMIN);
     {
         let admin_cap = create_admin_cap_for_testing(ts::ctx(&mut scenario));
-        create_board(&admin_cap, string::utf8(b"Team Board"), string::utf8(b""), &clock, ts::ctx(&mut scenario));
+        create_board(&admin_cap, string::utf8(b"Team Board"), string::utf8(b""), default_statuses(), &clock, ts::ctx(&mut scenario));
         transfer::public_transfer(admin_cap, ADMIN);
     };
     
@@ -186,7 +347,7 @@ fun test_admin_create_task() {
     ts::next_tx(&mut scenario, ADMIN);
     {
         let admin_cap = create_admin_cap_for_testing(ts::ctx(&mut scenario));
-        create_board(&admin_cap, string::utf8(b"Project Board"), string::utf8(b""), &clock, ts::ctx(&mut scenario));
+        create_board(&admin_cap, string::utf8(b"Project Board"), string::utf8(b""), default_statuses(), &clock, ts::ctx(&mut scenario));
         transfer::public_transfer(admin_cap, ADMIN);
     };
     
@@ -212,14 +373,14 @@ fun test_admin_create_task() {
         assert!(get_task_count(&board) == 1);
         assert!(task_exists(&board, 0));
         
-        // Verify task info
+        // Verify task info - should start with first status "To-Do"
         let (title, description, due_date, status, effort, assignees, creator, _created_at, _updated_at) = 
             get_task_info(&board, task_id);
         
         assert!(title == string::utf8(b"Implement feature X"));
         assert!(description == string::utf8(b"Detailed description of feature X"));
         assert!(due_date == 1735689600000);
-        assert!(status == status_open());
+        assert!(status == string::utf8(b"To-Do"));
         assert!(effort == 5);
         assert!(assignees == vector[ADMIN]);
         assert!(creator == ADMIN);
@@ -243,7 +404,7 @@ fun test_contributor_create_task() {
     ts::next_tx(&mut scenario, ADMIN);
     {
         let admin_cap = create_admin_cap_for_testing(ts::ctx(&mut scenario));
-        create_board(&admin_cap, string::utf8(b"Project Board"), string::utf8(b""), &clock, ts::ctx(&mut scenario));
+        create_board(&admin_cap, string::utf8(b"Project Board"), string::utf8(b""), default_statuses(), &clock, ts::ctx(&mut scenario));
         transfer::public_transfer(admin_cap, ADMIN);
     };
     
@@ -280,6 +441,10 @@ fun test_contributor_create_task() {
         
         assert!(task_id == 0);
         
+        // Verify task starts with first status
+        let (_, _, _, status, _, _, _, _, _) = get_task_info(&board, task_id);
+        assert!(status == string::utf8(b"To-Do"));
+        
         ts::return_to_sender(&scenario, contributor_cap);
         ts::return_shared(board);
     };
@@ -297,7 +462,7 @@ fun test_update_task_as_admin() {
     ts::next_tx(&mut scenario, ADMIN);
     {
         let admin_cap = create_admin_cap_for_testing(ts::ctx(&mut scenario));
-        create_board(&admin_cap, string::utf8(b"Project Board"), string::utf8(b""), &clock, ts::ctx(&mut scenario));
+        create_board(&admin_cap, string::utf8(b"Project Board"), string::utf8(b""), default_statuses(), &clock, ts::ctx(&mut scenario));
         transfer::public_transfer(admin_cap, ADMIN);
     };
     
@@ -365,7 +530,7 @@ fun test_update_task_status() {
     ts::next_tx(&mut scenario, ADMIN);
     {
         let admin_cap = create_admin_cap_for_testing(ts::ctx(&mut scenario));
-        create_board(&admin_cap, string::utf8(b"Project Board"), string::utf8(b""), &clock, ts::ctx(&mut scenario));
+        create_board(&admin_cap, string::utf8(b"Project Board"), string::utf8(b""), default_statuses(), &clock, ts::ctx(&mut scenario));
         transfer::public_transfer(admin_cap, ADMIN);
     };
     
@@ -391,34 +556,34 @@ fun test_update_task_status() {
         ts::return_shared(board);
     };
     
-    // Update status to in progress
+    // Update status to In-Progress
     ts::next_tx(&mut scenario, ADMIN);
     {
         let mut board = ts::take_shared<Board>(&scenario);
         let admin_cap = ts::take_from_sender<AdminCap>(&scenario);
         
         let (_, _, _, status, _, _, _, _, _) = get_task_info(&board, 0);
-        assert!(status == status_open());
+        assert!(status == string::utf8(b"To-Do"));
         
-        update_task_status_as_admin(&admin_cap, &mut board, 0, status_in_progress(), &clock, ts::ctx(&mut scenario));
+        update_task_status_as_admin(&admin_cap, &mut board, 0, string::utf8(b"In-Progress"), &clock, ts::ctx(&mut scenario));
         
         let (_, _, _, new_status, _, _, _, _, _) = get_task_info(&board, 0);
-        assert!(new_status == status_in_progress());
+        assert!(new_status == string::utf8(b"In-Progress"));
         
         ts::return_to_sender(&scenario, admin_cap);
         ts::return_shared(board);
     };
     
-    // Update status to done
+    // Update status to Done
     ts::next_tx(&mut scenario, ADMIN);
     {
         let mut board = ts::take_shared<Board>(&scenario);
         let admin_cap = ts::take_from_sender<AdminCap>(&scenario);
         
-        update_task_status_as_admin(&admin_cap, &mut board, 0, status_done(), &clock, ts::ctx(&mut scenario));
+        update_task_status_as_admin(&admin_cap, &mut board, 0, string::utf8(b"Done"), &clock, ts::ctx(&mut scenario));
         
         let (_, _, _, status, _, _, _, _, _) = get_task_info(&board, 0);
-        assert!(status == status_done());
+        assert!(status == string::utf8(b"Done"));
         
         ts::return_to_sender(&scenario, admin_cap);
         ts::return_shared(board);
@@ -437,7 +602,7 @@ fun test_contributor_update_task_status() {
     ts::next_tx(&mut scenario, ADMIN);
     {
         let admin_cap = create_admin_cap_for_testing(ts::ctx(&mut scenario));
-        create_board(&admin_cap, string::utf8(b"Project Board"), string::utf8(b""), &clock, ts::ctx(&mut scenario));
+        create_board(&admin_cap, string::utf8(b"Project Board"), string::utf8(b""), default_statuses(), &clock, ts::ctx(&mut scenario));
         transfer::public_transfer(admin_cap, ADMIN);
     };
     
@@ -482,10 +647,10 @@ fun test_contributor_update_task_status() {
         let mut board = ts::take_shared<Board>(&scenario);
         let contributor_cap = ts::take_from_sender<ContributorCap>(&scenario);
         
-        update_task_status_as_contributor(&contributor_cap, &mut board, 0, status_in_progress(), &clock, ts::ctx(&mut scenario));
+        update_task_status_as_contributor(&contributor_cap, &mut board, 0, string::utf8(b"In-Progress"), &clock, ts::ctx(&mut scenario));
         
         let (_, _, _, status, _, _, _, _, _) = get_task_info(&board, 0);
-        assert!(status == status_in_progress());
+        assert!(status == string::utf8(b"In-Progress"));
         
         ts::return_to_sender(&scenario, contributor_cap);
         ts::return_shared(board);
@@ -504,7 +669,7 @@ fun test_assign_task() {
     ts::next_tx(&mut scenario, ADMIN);
     {
         let admin_cap = create_admin_cap_for_testing(ts::ctx(&mut scenario));
-        create_board(&admin_cap, string::utf8(b"Project Board"), string::utf8(b""), &clock, ts::ctx(&mut scenario));
+        create_board(&admin_cap, string::utf8(b"Project Board"), string::utf8(b""), default_statuses(), &clock, ts::ctx(&mut scenario));
         transfer::public_transfer(admin_cap, ADMIN);
     };
     
@@ -565,7 +730,7 @@ fun test_create_multiple_tasks() {
     ts::next_tx(&mut scenario, ADMIN);
     {
         let admin_cap = create_admin_cap_for_testing(ts::ctx(&mut scenario));
-        create_board(&admin_cap, string::utf8(b"Project Board"), string::utf8(b""), &clock, ts::ctx(&mut scenario));
+        create_board(&admin_cap, string::utf8(b"Project Board"), string::utf8(b""), default_statuses(), &clock, ts::ctx(&mut scenario));
         transfer::public_transfer(admin_cap, ADMIN);
     };
     
@@ -633,7 +798,7 @@ fun test_update_nonexistent_task_fails() {
     ts::next_tx(&mut scenario, ADMIN);
     {
         let admin_cap = create_admin_cap_for_testing(ts::ctx(&mut scenario));
-        create_board(&admin_cap, string::utf8(b"Project Board"), string::utf8(b""), &clock, ts::ctx(&mut scenario));
+        create_board(&admin_cap, string::utf8(b"Project Board"), string::utf8(b""), default_statuses(), &clock, ts::ctx(&mut scenario));
         transfer::public_transfer(admin_cap, ADMIN);
     };
     
@@ -672,7 +837,7 @@ fun test_invalid_status_fails() {
     ts::next_tx(&mut scenario, ADMIN);
     {
         let admin_cap = create_admin_cap_for_testing(ts::ctx(&mut scenario));
-        create_board(&admin_cap, string::utf8(b"Project Board"), string::utf8(b""), &clock, ts::ctx(&mut scenario));
+        create_board(&admin_cap, string::utf8(b"Project Board"), string::utf8(b""), default_statuses(), &clock, ts::ctx(&mut scenario));
         transfer::public_transfer(admin_cap, ADMIN);
     };
     
@@ -704,7 +869,8 @@ fun test_invalid_status_fails() {
         let mut board = ts::take_shared<Board>(&scenario);
         let admin_cap = ts::take_from_sender<AdminCap>(&scenario);
         
-        update_task_status_as_admin(&admin_cap, &mut board, 0, 99, &clock, ts::ctx(&mut scenario));
+        // "Invalid-Status" is not in the board's workflow
+        update_task_status_as_admin(&admin_cap, &mut board, 0, string::utf8(b"Invalid-Status"), &clock, ts::ctx(&mut scenario));
         
         ts::return_to_sender(&scenario, admin_cap);
         ts::return_shared(board);
@@ -725,7 +891,7 @@ fun test_update_board() {
     ts::next_tx(&mut scenario, ADMIN);
     {
         let admin_cap = create_admin_cap_for_testing(ts::ctx(&mut scenario));
-        create_board(&admin_cap, string::utf8(b"Original Name"), string::utf8(b"Original Description"), &clock, ts::ctx(&mut scenario));
+        create_board(&admin_cap, string::utf8(b"Original Name"), string::utf8(b"Original Description"), default_statuses(), &clock, ts::ctx(&mut scenario));
         transfer::public_transfer(admin_cap, ADMIN);
     };
     
@@ -765,7 +931,7 @@ fun test_contributor_cap_board_id() {
     ts::next_tx(&mut scenario, ADMIN);
     {
         let admin_cap = create_admin_cap_for_testing(ts::ctx(&mut scenario));
-        create_board(&admin_cap, string::utf8(b"Board"), string::utf8(b""), &clock, ts::ctx(&mut scenario));
+        create_board(&admin_cap, string::utf8(b"Board"), string::utf8(b""), default_statuses(), &clock, ts::ctx(&mut scenario));
         transfer::public_transfer(admin_cap, ADMIN);
     };
     
@@ -799,7 +965,7 @@ fun test_contributor_wrong_board_fails() {
     ts::next_tx(&mut scenario, ADMIN);
     {
         let admin_cap = create_admin_cap_for_testing(ts::ctx(&mut scenario));
-        create_board(&admin_cap, string::utf8(b"Board 1"), string::utf8(b""), &clock, ts::ctx(&mut scenario));
+        create_board(&admin_cap, string::utf8(b"Board 1"), string::utf8(b""), default_statuses(), &clock, ts::ctx(&mut scenario));
         transfer::public_transfer(admin_cap, ADMIN);
     };
     
@@ -820,7 +986,7 @@ fun test_contributor_wrong_board_fails() {
     ts::next_tx(&mut scenario, ADMIN);
     {
         let admin_cap = ts::take_from_sender<AdminCap>(&scenario);
-        create_board(&admin_cap, string::utf8(b"Board 2"), string::utf8(b""), &clock, ts::ctx(&mut scenario));
+        create_board(&admin_cap, string::utf8(b"Board 2"), string::utf8(b""), default_statuses(), &clock, ts::ctx(&mut scenario));
         ts::return_to_sender(&scenario, admin_cap);
     };
     
