@@ -32,10 +32,10 @@ export function useTasks(boardId?: string) {
 }
 
 interface CreateTaskData {
-  contributorCapId: string;
   title: string;
   description: string;
-  assignee?: string;
+  assignee: string;
+  status: TaskStatus;
   dueDate: number;
   effortHours: number;
 }
@@ -52,19 +52,21 @@ export function useCreateTask(boardId: string) {
         throw new Error('Wallet not connected');
       }
 
-      // Create task using MoveIt contract
+      // Note: This needs to be adjusted based on your actual smart contract
+      // You'll need the capability ID to create tasks
       const tx = new Transaction();
       tx.moveCall({
-        target: `${PACKAGE_ID}::moveit::create_task`,
+        target: `${PACKAGE_ID}::task::create`,
         arguments: [
-          tx.object(data.contributorCapId), // ContributorCap
-          tx.object(boardId), // Board (shared object)
+          tx.object(boardId),
           tx.pure.string(data.title),
           tx.pure.string(data.description),
+          tx.pure.address(data.assignee || account.address),
+          tx.pure.u8(data.status),
           tx.pure.u64(data.dueDate),
           tx.pure.u64(data.effortHours),
-          tx.pure.vector('address', data.assignee ? [data.assignee] : [account.address]),
           tx.object(CLOCK_ID),
+          // capability object would go here
         ],
       });
 
@@ -85,14 +87,7 @@ export function useCreateTask(boardId: string) {
 
 interface UpdateTaskData {
   taskId: string;
-  boardId: string;
-  contributorCapId: string;
-  updates: {
-    title?: string;
-    description?: string;
-    dueDate?: number;
-    effortHours?: number;
-  };
+  updates: Partial<CreateTaskData>;
 }
 
 export function useUpdateTask() {
@@ -102,31 +97,28 @@ export function useUpdateTask() {
   const { toast } = useToast();
 
   return useMutation({
-    mutationFn: async ({ taskId, boardId, contributorCapId, updates }: UpdateTaskData) => {
+    mutationFn: async ({ taskId, updates }: UpdateTaskData) => {
       if (!account) {
         throw new Error('Wallet not connected');
       }
 
-      if (!contributorCapId) {
-        throw new Error('Contributor capability required');
-      }
-
-      // Update task using MoveIt contract
+      // Note: This needs to be adjusted based on your actual smart contract
+      // You'll need the capability ID and task object
       const tx = new Transaction();
       
-      tx.moveCall({
-        target: `${PACKAGE_ID}::moveit::update_task`,
-        arguments: [
-          tx.object(contributorCapId),
-          tx.object(boardId),
-          tx.pure.u64(parseInt(taskId)),
-          tx.pure.string(updates.title || ''),
-          tx.pure.string(updates.description || ''),
-          tx.pure.u64(updates.dueDate || 0),
-          tx.pure.u64(updates.effortHours || 0),
-          tx.object(CLOCK_ID),
-        ],
-      });
+      if (updates.status !== undefined) {
+        tx.moveCall({
+          target: `${PACKAGE_ID}::task::update_status`,
+          arguments: [
+            tx.object(taskId),
+            tx.pure.u8(updates.status),
+            // capability object would go here
+            tx.object(CLOCK_ID),
+          ],
+        });
+      }
+
+      // Add more update calls for other fields as needed
 
       return signAndExecute({ transaction: tx });
     },
