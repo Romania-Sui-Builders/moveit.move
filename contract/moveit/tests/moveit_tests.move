@@ -8,7 +8,6 @@ use moveit::moveit::{
     ContributorCap,
     create_board,
     add_contributor,
-    remove_contributor,
     update_board,
     add_status,
     remove_status,
@@ -273,18 +272,26 @@ fun test_add_contributor() {
         let board = ts::take_shared<Board>(&scenario);
         let admin_cap = ts::take_from_sender<AdminCap>(&scenario);
         
-        let contributor_cap = add_contributor(
+        add_contributor(
             &admin_cap,
             &board,
             CONTRIBUTOR1,
             ts::ctx(&mut scenario)
         );
         
-        // Verify contributor cap is valid for the board
+        ts::return_to_sender(&scenario, admin_cap);
+        ts::return_shared(board);
+    };
+    
+    // Verify contributor cap is valid for the board
+    ts::next_tx(&mut scenario, CONTRIBUTOR1);
+    {
+        let board = ts::take_shared<Board>(&scenario);
+        let contributor_cap = ts::take_from_sender<ContributorCap>(&scenario);
+        
         assert!(is_valid_contributor_cap(&board, &contributor_cap));
         
-        transfer::public_transfer(contributor_cap, CONTRIBUTOR1);
-        ts::return_to_sender(&scenario, admin_cap);
+        ts::return_to_sender(&scenario, contributor_cap);
         ts::return_shared(board);
     };
     
@@ -293,7 +300,7 @@ fun test_add_contributor() {
 }
 
 #[test]
-fun test_remove_contributor_event() {
+fun test_burn_contributor_cap() {
     let mut scenario = setup_test();
     let clock = create_test_clock(&mut scenario);
     
@@ -310,26 +317,13 @@ fun test_remove_contributor_event() {
         let board = ts::take_shared<Board>(&scenario);
         let admin_cap = ts::take_from_sender<AdminCap>(&scenario);
         
-        let contributor_cap = add_contributor(&admin_cap, &board, CONTRIBUTOR1, ts::ctx(&mut scenario));
-        
-        transfer::public_transfer(contributor_cap, CONTRIBUTOR1);
-        ts::return_to_sender(&scenario, admin_cap);
-        ts::return_shared(board);
-    };
-    
-    // Admin emits removal event
-    ts::next_tx(&mut scenario, ADMIN);
-    {
-        let board = ts::take_shared<Board>(&scenario);
-        let admin_cap = ts::take_from_sender<AdminCap>(&scenario);
-        
-        remove_contributor(&admin_cap, &board, CONTRIBUTOR1, ts::ctx(&mut scenario));
+        add_contributor(&admin_cap, &board, CONTRIBUTOR1, ts::ctx(&mut scenario));
         
         ts::return_to_sender(&scenario, admin_cap);
         ts::return_shared(board);
     };
     
-    // Contributor burns their cap
+    // Contributor burns their own cap
     ts::next_tx(&mut scenario, CONTRIBUTOR1);
     {
         let contributor_cap = ts::take_from_sender<ContributorCap>(&scenario);
@@ -418,9 +412,8 @@ fun test_contributor_create_task() {
         let board = ts::take_shared<Board>(&scenario);
         let admin_cap = ts::take_from_sender<AdminCap>(&scenario);
         
-        let contributor_cap = add_contributor(&admin_cap, &board, CONTRIBUTOR1, ts::ctx(&mut scenario));
+        add_contributor(&admin_cap, &board, CONTRIBUTOR1, ts::ctx(&mut scenario));
         
-        transfer::public_transfer(contributor_cap, CONTRIBUTOR1);
         ts::return_to_sender(&scenario, admin_cap);
         ts::return_shared(board);
     };
@@ -616,9 +609,8 @@ fun test_contributor_update_task_status() {
         let board = ts::take_shared<Board>(&scenario);
         let admin_cap = ts::take_from_sender<AdminCap>(&scenario);
         
-        let contributor_cap = add_contributor(&admin_cap, &board, CONTRIBUTOR1, ts::ctx(&mut scenario));
+        add_contributor(&admin_cap, &board, CONTRIBUTOR1, ts::ctx(&mut scenario));
         
-        transfer::public_transfer(contributor_cap, CONTRIBUTOR1);
         ts::return_to_sender(&scenario, admin_cap);
         ts::return_shared(board);
     };
@@ -939,20 +931,28 @@ fun test_contributor_cap_board_id() {
         transfer::public_transfer(admin_cap, ADMIN);
     };
     
-    // Add contributor and verify cap
+    // Add contributor
     ts::next_tx(&mut scenario, ADMIN);
     {
         let board = ts::take_shared<Board>(&scenario);
         let admin_cap = ts::take_from_sender<AdminCap>(&scenario);
         
-        let contributor_cap = add_contributor(&admin_cap, &board, CONTRIBUTOR1, ts::ctx(&mut scenario));
+        add_contributor(&admin_cap, &board, CONTRIBUTOR1, ts::ctx(&mut scenario));
         
-        // Verify board ID matches
+        ts::return_to_sender(&scenario, admin_cap);
+        ts::return_shared(board);
+    };
+    
+    // Verify board ID matches
+    ts::next_tx(&mut scenario, CONTRIBUTOR1);
+    {
+        let board = ts::take_shared<Board>(&scenario);
+        let contributor_cap = ts::take_from_sender<ContributorCap>(&scenario);
+        
         let contributor_board_id = get_contributor_cap_board_id(&contributor_cap);
         assert!(contributor_board_id == object::id(&board));
         
-        transfer::public_transfer(contributor_cap, CONTRIBUTOR1);
-        ts::return_to_sender(&scenario, admin_cap);
+        ts::return_to_sender(&scenario, contributor_cap);
         ts::return_shared(board);
     };
     
@@ -979,9 +979,8 @@ fun test_contributor_wrong_board_fails() {
         let board = ts::take_shared<Board>(&scenario);
         let admin_cap = ts::take_from_sender<AdminCap>(&scenario);
         
-        let contributor_cap = add_contributor(&admin_cap, &board, CONTRIBUTOR1, ts::ctx(&mut scenario));
+        add_contributor(&admin_cap, &board, CONTRIBUTOR1, ts::ctx(&mut scenario));
         
-        transfer::public_transfer(contributor_cap, CONTRIBUTOR1);
         ts::return_to_sender(&scenario, admin_cap);
         ts::return_shared(board);
     };
