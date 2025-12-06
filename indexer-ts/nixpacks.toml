@@ -1,6 +1,3 @@
-[phases.build]
-cmds = ["npm ci", "npx prisma generate", "npx tsc"]
-
 [phases.setup]
 nixPkgs = ["nodejs_18"]
 
