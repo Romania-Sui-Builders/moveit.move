@@ -169,17 +169,6 @@ public fun create_board(
     board_id
 }
 
-/// Entry function to create a board (admin only)
-entry fun create_board_entry(
-    admin_cap: &AdminCap,
-    name: String,
-    description: String,
-    clock: &Clock,
-    ctx: &mut TxContext,
-) {
-    create_board(admin_cap, name, description, clock, ctx);
-}
-
 /// Update board metadata (admin only)
 public fun update_board(
     _: &AdminCap,
@@ -211,17 +200,6 @@ public fun add_contributor(
         id: object::new(ctx),
         board_id: object::id(board),
     }
-}
-
-/// Entry function to add a contributor and transfer the ContributorCap to them
-entry fun add_contributor_entry(
-    admin_cap: &AdminCap,
-    board: &Board,
-    new_contributor: address,
-    ctx: &mut TxContext,
-) {
-    let contributor_cap = add_contributor(admin_cap, board, new_contributor, ctx);
-    transfer::transfer(contributor_cap, new_contributor);
 }
 
 /// Emit a removal event (admin only).
@@ -361,36 +339,6 @@ public fun assign_task_as_contributor(
 ) {
     assert!(cap.board_id == object::id(board), EInvalidBoardId);
     assign_task_internal(board, task_id, assignees, clock, ctx);
-}
-
-// ===== Entry Functions for Tasks =====
-
-entry fun create_task_admin_entry(
-    admin_cap: &AdminCap,
-    board: &mut Board,
-    title: String,
-    description: String,
-    due_date: u64,
-    effort: u64,
-    assignees: vector<address>,
-    clock: &Clock,
-    ctx: &TxContext,
-) {
-    create_task_as_admin(admin_cap, board, title, description, due_date, effort, assignees, clock, ctx);
-}
-
-entry fun create_task_contributor_entry(
-    cap: &ContributorCap,
-    board: &mut Board,
-    title: String,
-    description: String,
-    due_date: u64,
-    effort: u64,
-    assignees: vector<address>,
-    clock: &Clock,
-    ctx: &TxContext,
-) {
-    create_task_as_contributor(cap, board, title, description, due_date, effort, assignees, clock, ctx);
 }
 
 // ===== View Functions =====
