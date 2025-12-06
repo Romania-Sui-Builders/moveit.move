@@ -37,6 +37,11 @@ use moveit::moveit::{
     needs_migration,
     create_admin_cap_for_testing,
     create_contributor_cap_for_testing,
+    // Comment functions
+    add_comment,
+    get_comment,
+    get_comment_count,
+    has_comments,
 };
 use sui::test_scenario::{Self as ts, Scenario};
 use sui::clock::{Self, Clock};
@@ -1099,6 +1104,329 @@ fun test_cannot_nest_subtasks() {
         ts::return_shared(subtask);
         ts::return_shared(_parent_task);
         ts::return_shared(board);
+    };
+    
+    clock.destroy_for_testing();
+    ts::end(scenario);
+}
+
+// ===== Comment Tests =====
+
+#[test]
+fun test_add_comment() {
+    let mut scenario = setup_test();
+    let clock = create_test_clock(&mut scenario);
+    
+    // Create board
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let admin_cap = create_admin_cap_for_testing(ts::ctx(&mut scenario));
+        create_board(&admin_cap, string::utf8(b"Board"), string::utf8(b"Desc"), default_statuses(), &clock, ts::ctx(&mut scenario));
+        transfer::public_transfer(admin_cap, ADMIN);
+    };
+    
+    // Create task
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let mut board = ts::take_shared<Board>(&scenario);
+        let contributor_cap = create_contributor_cap_for_testing(&board, ts::ctx(&mut scenario));
+        
+        create_task(&contributor_cap, &mut board, string::utf8(b"Task"), string::utf8(b""), 0, 5, vector[], &clock, ts::ctx(&mut scenario));
+        
+        burn_contributor_cap(contributor_cap);
+        ts::return_shared(board);
+    };
+    
+    // Add comment
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let board = ts::take_shared<Board>(&scenario);
+        let mut task = ts::take_shared<Task>(&scenario);
+        let contributor_cap = create_contributor_cap_for_testing(&board, ts::ctx(&mut scenario));
+        
+        // Initially no comments
+        assert!(!has_comments(&task), 0);
+        assert!(get_comment_count(&task) == 0, 1);
+        
+        // Add first comment
+        add_comment(&contributor_cap, &mut task, string::utf8(b"First comment!"), &clock, ts::ctx(&mut scenario));
+        
+        assert!(has_comments(&task), 2);
+        assert!(get_comment_count(&task) == 1, 3);
+        
+        // Verify comment content
+        let (content, author, _created_at) = get_comment(&task, 1);
+        assert!(content == string::utf8(b"First comment!"), 4);
+        assert!(author == ADMIN, 5);
+        
+        burn_contributor_cap(contributor_cap);
+        ts::return_shared(task);
+        ts::return_shared(board);
+    };
+    
+    clock.destroy_for_testing();
+    ts::end(scenario);
+}
+
+#[test]
+fun test_multiple_comments() {
+    let mut scenario = setup_test();
+    let clock = create_test_clock(&mut scenario);
+    
+    // Create board
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let admin_cap = create_admin_cap_for_testing(ts::ctx(&mut scenario));
+        create_board(&admin_cap, string::utf8(b"Board"), string::utf8(b""), default_statuses(), &clock, ts::ctx(&mut scenario));
+        transfer::public_transfer(admin_cap, ADMIN);
+    };
+    
+    // Create task
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let mut board = ts::take_shared<Board>(&scenario);
+        let contributor_cap = create_contributor_cap_for_testing(&board, ts::ctx(&mut scenario));
+        
+        create_task(&contributor_cap, &mut board, string::utf8(b"Task"), string::utf8(b""), 0, 5, vector[], &clock, ts::ctx(&mut scenario));
+        
+        burn_contributor_cap(contributor_cap);
+        ts::return_shared(board);
+    };
+    
+    // Add multiple comments
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let board = ts::take_shared<Board>(&scenario);
+        let mut task = ts::take_shared<Task>(&scenario);
+        let contributor_cap = create_contributor_cap_for_testing(&board, ts::ctx(&mut scenario));
+        
+        add_comment(&contributor_cap, &mut task, string::utf8(b"Comment 1"), &clock, ts::ctx(&mut scenario));
+        add_comment(&contributor_cap, &mut task, string::utf8(b"Comment 2"), &clock, ts::ctx(&mut scenario));
+        add_comment(&contributor_cap, &mut task, string::utf8(b"Comment 3"), &clock, ts::ctx(&mut scenario));
+        
+        assert!(get_comment_count(&task) == 3, 0);
+        
+        // Verify each comment
+        let (content1, _, _) = get_comment(&task, 1);
+        let (content2, _, _) = get_comment(&task, 2);
+        let (content3, _, _) = get_comment(&task, 3);
+        
+        assert!(content1 == string::utf8(b"Comment 1"), 1);
+        assert!(content2 == string::utf8(b"Comment 2"), 2);
+        assert!(content3 == string::utf8(b"Comment 3"), 3);
+        
+        burn_contributor_cap(contributor_cap);
+        ts::return_shared(task);
+        ts::return_shared(board);
+    };
+    
+    clock.destroy_for_testing();
+    ts::end(scenario);
+}
+
+#[test]
+fun test_comments_from_different_users() {
+    let mut scenario = setup_test();
+    let clock = create_test_clock(&mut scenario);
+    
+    // Create board
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let admin_cap = create_admin_cap_for_testing(ts::ctx(&mut scenario));
+        create_board(&admin_cap, string::utf8(b"Board"), string::utf8(b""), default_statuses(), &clock, ts::ctx(&mut scenario));
+        transfer::public_transfer(admin_cap, ADMIN);
+    };
+    
+    // Create task
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let mut board = ts::take_shared<Board>(&scenario);
+        let contributor_cap = create_contributor_cap_for_testing(&board, ts::ctx(&mut scenario));
+        
+        create_task(&contributor_cap, &mut board, string::utf8(b"Task"), string::utf8(b""), 0, 5, vector[], &clock, ts::ctx(&mut scenario));
+        
+        burn_contributor_cap(contributor_cap);
+        ts::return_shared(board);
+    };
+    
+    // Admin adds comment
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let board = ts::take_shared<Board>(&scenario);
+        let mut task = ts::take_shared<Task>(&scenario);
+        let contributor_cap = create_contributor_cap_for_testing(&board, ts::ctx(&mut scenario));
+        
+        add_comment(&contributor_cap, &mut task, string::utf8(b"Admin comment"), &clock, ts::ctx(&mut scenario));
+        
+        burn_contributor_cap(contributor_cap);
+        ts::return_shared(task);
+        ts::return_shared(board);
+    };
+    
+    // Contributor adds comment
+    ts::next_tx(&mut scenario, CONTRIBUTOR1);
+    {
+        let board = ts::take_shared<Board>(&scenario);
+        let mut task = ts::take_shared<Task>(&scenario);
+        let contributor_cap = create_contributor_cap_for_testing(&board, ts::ctx(&mut scenario));
+        
+        add_comment(&contributor_cap, &mut task, string::utf8(b"Contributor comment"), &clock, ts::ctx(&mut scenario));
+        
+        burn_contributor_cap(contributor_cap);
+        ts::return_shared(task);
+        ts::return_shared(board);
+    };
+    
+    // Verify authors
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let task = ts::take_shared<Task>(&scenario);
+        
+        let (_, author1, _) = get_comment(&task, 1);
+        let (_, author2, _) = get_comment(&task, 2);
+        
+        assert!(author1 == ADMIN, 0);
+        assert!(author2 == CONTRIBUTOR1, 1);
+        
+        ts::return_shared(task);
+    };
+    
+    clock.destroy_for_testing();
+    ts::end(scenario);
+}
+
+#[test, expected_failure(abort_code = moveit::EEmptyComment)]
+fun test_empty_comment_fails() {
+    let mut scenario = setup_test();
+    let clock = create_test_clock(&mut scenario);
+    
+    // Create board
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let admin_cap = create_admin_cap_for_testing(ts::ctx(&mut scenario));
+        create_board(&admin_cap, string::utf8(b"Board"), string::utf8(b""), default_statuses(), &clock, ts::ctx(&mut scenario));
+        transfer::public_transfer(admin_cap, ADMIN);
+    };
+    
+    // Create task
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let mut board = ts::take_shared<Board>(&scenario);
+        let contributor_cap = create_contributor_cap_for_testing(&board, ts::ctx(&mut scenario));
+        
+        create_task(&contributor_cap, &mut board, string::utf8(b"Task"), string::utf8(b""), 0, 5, vector[], &clock, ts::ctx(&mut scenario));
+        
+        burn_contributor_cap(contributor_cap);
+        ts::return_shared(board);
+    };
+    
+    // Try to add empty comment - should fail
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let board = ts::take_shared<Board>(&scenario);
+        let mut task = ts::take_shared<Task>(&scenario);
+        let contributor_cap = create_contributor_cap_for_testing(&board, ts::ctx(&mut scenario));
+        
+        add_comment(&contributor_cap, &mut task, string::utf8(b""), &clock, ts::ctx(&mut scenario));
+        
+        burn_contributor_cap(contributor_cap);
+        ts::return_shared(task);
+        ts::return_shared(board);
+    };
+    
+    clock.destroy_for_testing();
+    ts::end(scenario);
+}
+
+#[test, expected_failure(abort_code = moveit::ECommentNotFound)]
+fun test_get_nonexistent_comment_fails() {
+    let mut scenario = setup_test();
+    let clock = create_test_clock(&mut scenario);
+    
+    // Create board
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let admin_cap = create_admin_cap_for_testing(ts::ctx(&mut scenario));
+        create_board(&admin_cap, string::utf8(b"Board"), string::utf8(b""), default_statuses(), &clock, ts::ctx(&mut scenario));
+        transfer::public_transfer(admin_cap, ADMIN);
+    };
+    
+    // Create task
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let mut board = ts::take_shared<Board>(&scenario);
+        let contributor_cap = create_contributor_cap_for_testing(&board, ts::ctx(&mut scenario));
+        
+        create_task(&contributor_cap, &mut board, string::utf8(b"Task"), string::utf8(b""), 0, 5, vector[], &clock, ts::ctx(&mut scenario));
+        
+        burn_contributor_cap(contributor_cap);
+        ts::return_shared(board);
+    };
+    
+    // Try to get comment that doesn't exist
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let task = ts::take_shared<Task>(&scenario);
+        
+        // Comment 1 doesn't exist
+        let (_content, _author, _time) = get_comment(&task, 1);
+        
+        ts::return_shared(task);
+    };
+    
+    clock.destroy_for_testing();
+    ts::end(scenario);
+}
+
+#[test, expected_failure(abort_code = moveit::EInvalidBoardId)]
+fun test_comment_wrong_board_cap_fails() {
+    let mut scenario = setup_test();
+    let clock = create_test_clock(&mut scenario);
+    
+    // Create first board
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let admin_cap = create_admin_cap_for_testing(ts::ctx(&mut scenario));
+        create_board(&admin_cap, string::utf8(b"Board 1"), string::utf8(b""), default_statuses(), &clock, ts::ctx(&mut scenario));
+        transfer::public_transfer(admin_cap, ADMIN);
+    };
+    
+    // Create second board
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let admin_cap = ts::take_from_sender<AdminCap>(&scenario);
+        create_board(&admin_cap, string::utf8(b"Board 2"), string::utf8(b""), default_statuses(), &clock, ts::ctx(&mut scenario));
+        transfer::public_transfer(admin_cap, ADMIN);
+    };
+    
+    // Create task on first board
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let mut board1 = ts::take_shared<Board>(&scenario);
+        let contributor_cap = create_contributor_cap_for_testing(&board1, ts::ctx(&mut scenario));
+        
+        create_task(&contributor_cap, &mut board1, string::utf8(b"Task"), string::utf8(b""), 0, 5, vector[], &clock, ts::ctx(&mut scenario));
+        
+        burn_contributor_cap(contributor_cap);
+        ts::return_shared(board1);
+    };
+    
+    // Try to comment with cap from wrong board - should fail
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let board1 = ts::take_shared<Board>(&scenario);
+        let board2 = ts::take_shared<Board>(&scenario);
+        let mut task = ts::take_shared<Task>(&scenario);
+        
+        // Create cap for board2 but try to comment on task from board1
+        let wrong_cap = create_contributor_cap_for_testing(&board2, ts::ctx(&mut scenario));
+        
+        add_comment(&wrong_cap, &mut task, string::utf8(b"Wrong board"), &clock, ts::ctx(&mut scenario));
+        
+        burn_contributor_cap(wrong_cap);
+        ts::return_shared(task);
+        ts::return_shared(board2);
+        ts::return_shared(board1);
     };
     
     clock.destroy_for_testing();
