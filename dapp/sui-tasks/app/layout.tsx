@@ -1,53 +1,47 @@
-"use client";
-import { Inter } from "next/font/google";
-import { Theme } from "@radix-ui/themes";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { SuiClientProvider, WalletProvider } from "@mysten/dapp-kit";
-import { networkConfig } from "@/core/networkConfig";
-import "@radix-ui/themes/styles.css";
-import "./globals.css";
-import { Navigation } from "@/components/Navigation";
-import { Toaster } from "@/components/ui/Toaster";
+import type React from "react"
+import type { Metadata } from "next"
+import { Geist, Geist_Mono } from "next/font/google"
+import { Analytics } from "@vercel/analytics/next"
+import { Providers } from "@/components/providers"
+import "./globals.css"
 
-const inter = Inter({ subsets: ["latin"] });
+const _geist = Geist({ subsets: ["latin"] })
+const _geistMono = Geist_Mono({ subsets: ["latin"] })
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 30000,
-      gcTime: 5 * 60 * 1000,
-      refetchOnWindowFocus: false,
-    },
+export const metadata: Metadata = {
+  title: "MoveIt - Decentralized Task Management",
+  description: "Manage your tasks on the Sui blockchain",
+  generator: "v0.app",
+  icons: {
+    icon: [
+      {
+        url: "/icon-light-32x32.png",
+        media: "(prefers-color-scheme: light)",
+      },
+      {
+        url: "/icon-dark-32x32.png",
+        media: "(prefers-color-scheme: dark)",
+      },
+      {
+        url: "/icon.svg",
+        type: "image/svg+xml",
+      },
+    ],
+    apple: "/apple-icon.png",
   },
-});
+}
 
 export default function RootLayout({
   children,
 }: Readonly<{
-  children: React.ReactNode;
+  children: React.ReactNode
 }>) {
   return (
-    <html lang="en">
-      <body className={inter.className}>
-        <Theme appearance="dark" accentColor="violet" grayColor="slate">
-          <QueryClientProvider client={queryClient}>
-            <SuiClientProvider
-              networks={networkConfig}
-              defaultNetwork="testnet"
-            >
-              <WalletProvider autoConnect>
-                <div className="min-h-screen bg-gray-1">
-                  <Navigation />
-                  <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-                    {children}
-                  </main>
-                  <Toaster />
-                </div>
-              </WalletProvider>
-            </SuiClientProvider>
-          </QueryClientProvider>
-        </Theme>
+    <html lang="en" className="dark">
+      <body className={`font-sans antialiased`}>
+        <Providers>{children}</Providers>
+        <Analytics />
       </body>
     </html>
-  );
+  )
 }
