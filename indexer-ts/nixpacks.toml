@@ -1,6 +1,2 @@
 [phases.setup]
 nixPkgs = ["nodejs_18"]
-
-[start]
-cmd = "npx prisma migrate deploy && node dist/main.js"
-
