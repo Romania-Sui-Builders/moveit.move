@@ -27,7 +27,7 @@ import {
   getStatusColor,
   formatDate,
 } from '@/utils/sui';
-import type { TaskStatus } from '@/types/board';
+import { TaskStatus } from '@/types/board';
 
 interface TaskListProps {
   boardId: string;

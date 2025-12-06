@@ -1,15 +1,8 @@
 // components/TaskCard.tsx
-'use client';
+"use client";
 
-import { useState } from 'react';
-import {
-  Card,
-  Heading,
-  Text,
-  Flex,
-  Badge,
-  Box,
-} from '@radix-ui/themes';
+import { useState } from "react";
+import { Card, Heading, Text, Flex, Badge, Box } from "@radix-ui/themes";
 import {
   Clock,
   User,
@@ -17,15 +10,15 @@ import {
   Edit,
   CheckCircle,
   PlayCircle,
-} from 'lucide-react';
-import { TaskForm } from './TaskForm';
+} from "lucide-react";
+import { TaskForm } from "./TaskForm";
 import {
   getStatusText,
   getStatusColor,
   formatDate,
   truncateAddress,
-} from '@/utils/sui';
-import type { Task } from '@/types/board';
+} from "@/utils/sui";
+import { Task, TaskStatus } from "@/types/board";
 
 interface TaskCardProps {
   task: Task;
@@ -33,9 +26,10 @@ interface TaskCardProps {
 
 export function TaskCard({ task }: TaskCardProps) {
   const [showEditForm, setShowEditForm] = useState(false);
-  
-  const isOverdue = task.status !== TaskStatus.DONE && task.dueDate < Date.now();
-  
+
+  const isOverdue =
+    task.status !== TaskStatus.DONE && task.dueDate < Date.now();
+
   const statusIcon = {
     [TaskStatus.TODO]: <AlertCircle className="w-4 h-4" />,
     [TaskStatus.IN_PROGRESS]: <PlayCircle className="w-4 h-4" />,
@@ -68,21 +62,23 @@ export function TaskCard({ task }: TaskCardProps) {
           </Flex>
 
           <Text size="2" color="gray" className="line-clamp-2">
-            {task.description || 'No description'}
+            {task.description || "No description"}
           </Text>
 
           <Flex gap="3" align="center">
             <Flex align="center" gap="1">
               <User className="w-3 h-3 text-gray-11" />
               <Text size="1" color="gray">
-                {task.assignee ? truncateAddress(task.assignee) : 'Unassigned'}
+                {task.assignee ? truncateAddress(task.assignee) : "Unassigned"}
               </Text>
             </Flex>
 
             <Flex align="center" gap="1">
-              <Clock className={`w-3 h-3 ${isOverdue ? 'text-red-9' : 'text-gray-11'}`} />
-              <Text size="1" color={isOverdue ? 'red' : 'gray'}>
-                {isOverdue ? 'Overdue' : formatDate(task.dueDate)}
+              <Clock
+                className={`w-3 h-3 ${isOverdue ? "text-red-9" : "text-gray-11"}`}
+              />
+              <Text size="1" color={isOverdue ? "red" : "gray"}>
+                {isOverdue ? "Overdue" : formatDate(task.dueDate)}
               </Text>
             </Flex>
           </Flex>

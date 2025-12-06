@@ -2,7 +2,7 @@
 "use client";
 
 import { useState } from "react";
-import { Table } from "@radix-ui/themes";
+import { Badge, Table, Text } from "@radix-ui/themes";
 import { Clock, User } from "lucide-react";
 import { TaskForm } from "./TaskForm";
 import {
@@ -11,7 +11,7 @@ import {
   formatDate,
   truncateAddress,
 } from "@/utils/sui";
-import type { Task } from "@/types/board";
+import { Task, TaskStatus } from "@/types/board";
 
 interface TaskRowProps {
   task: Task;

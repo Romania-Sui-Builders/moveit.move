@@ -16,12 +16,13 @@ import {
   Text,
   Box,
   Select,
+  Grid,
 } from "@radix-ui/themes";
 import { Loader2, X, Calendar, User } from "lucide-react";
 import { useCreateTask, useUpdateTask } from "@/hooks/useTasks";
 import { useToast } from "@/hooks/useToast";
 import { isValidSuiAddress } from "@/utils/sui";
-import type { Task, TaskStatus } from "@/types/board";
+import { Task, TaskStatus } from "@/types/board";
 
 interface TaskFormProps {
   boardId: string;
@@ -162,14 +163,12 @@ export function TaskForm({ boardId, task, onClose, onSuccess }: TaskFormProps) {
             <Text as="label" size="2" weight="medium">
               Title *
             </Text>
-            <TextField.Root>
-              <TextField.Input
-                placeholder="Enter task title"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className={errors.title ? "border-red-7" : ""}
-              />
-            </TextField.Root>
+            <TextField.Root
+              placeholder="Enter task title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className={errors.title ? "border-red-7" : ""}
+            />
             <Flex justify="between">
               <Text size="1" color={errors.title ? "red" : "gray"}>
                 {errors.title || "Required, max 200 characters"}
@@ -204,20 +203,19 @@ export function TaskForm({ boardId, task, onClose, onSuccess }: TaskFormProps) {
             <Box className="space-y-2">
               <Text as="label" size="2" weight="medium">
                 Assignee
+              <Text as="label" size="2" weight="medium">
+                Assignee
               </Text>
-              <TextField.Root>
+              <TextField.Root
+                placeholder="0x..."
+                value={assignee}
+                onChange={(e) => setAssignee(e.target.value)}
+                className={errors.assignee ? "border-red-7" : ""}
+              >
                 <TextField.Slot>
                   <User className="w-4 h-4" />
                 </TextField.Slot>
-                <TextField.Input
-                  placeholder="0x..."
-                  value={assignee}
-                  onChange={(e) => setAssignee(e.target.value)}
-                  className={errors.assignee ? "border-red-7" : ""}
-                />
               </TextField.Root>
-              <Text size="1" color={errors.assignee ? "red" : "gray"}>
-                {errors.assignee || "Optional, enter a Sui address"}
               </Text>
             </Box>
 
@@ -250,17 +248,15 @@ export function TaskForm({ boardId, task, onClose, onSuccess }: TaskFormProps) {
               <Text as="label" size="2" weight="medium">
                 Due Date
               </Text>
-              <TextField.Root>
+              <TextField.Root
+                type="date"
+                value={dueDate}
+                onChange={(e) => setDueDate(e.target.value)}
+                className={errors.dueDate ? "border-red-7" : ""}
+              >
                 <TextField.Slot>
                   <Calendar className="w-4 h-4" />
                 </TextField.Slot>
-                <TextField.Input
-                  type="date"
-                  value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
-                  className={errors.dueDate ? "border-red-7" : ""}
-                  min={new Date().toISOString().split("T")[0]}
-                />
               </TextField.Root>
               <Text size="1" color={errors.dueDate ? "red" : "gray"}>
                 {errors.dueDate || "Optional, cannot be in the past"}
@@ -271,19 +267,17 @@ export function TaskForm({ boardId, task, onClose, onSuccess }: TaskFormProps) {
               <Text as="label" size="2" weight="medium">
                 Effort (hours)
               </Text>
-              <TextField.Root>
-                <TextField.Input
-                  type="number"
-                  min="0"
-                  max="1000"
-                  value={effortHours}
-                  onChange={(e) => setEffortHours(e.target.value)}
-                  className={errors.effortHours ? "border-red-7" : ""}
-                />
-              </TextField.Root>
-              <Text size="1" color={errors.effortHours ? "red" : "gray"}>
-                {errors.effortHours || "Estimated hours (0-1000)"}
+              <Text as="label" size="2" weight="medium">
+                Effort (hours)
               </Text>
+              <TextField.Root
+                type="number"
+                min="0"
+                max="1000"
+                value={effortHours}
+                onChange={(e) => setEffortHours(e.target.value)}
+                className={errors.effortHours ? "border-red-7" : ""}
+              />
             </Box>
           </Grid>
 

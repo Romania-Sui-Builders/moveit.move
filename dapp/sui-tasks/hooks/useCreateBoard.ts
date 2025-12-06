@@ -1,6 +1,7 @@
 // hooks/useCreateBoard.ts
 import { useCurrentAccount, useSignAndExecuteTransaction } from '@mysten/dapp-kit';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { Transaction } from '@mysten/sui/transactions';
 import { PACKAGE_ID, CLOCK_ID } from '@/core/constants';
 import { useToast } from './useToast';
 

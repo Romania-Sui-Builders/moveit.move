@@ -1,4 +1,4 @@
-# Lovable.dev Prompt for MoveIt - Sui Blockchain Task Management dApp
+# Prompt for MoveIt - Sui Blockchain Task Management dApp
 
 ## Project Overview
 
@@ -835,7 +835,7 @@ export function BoardCard({ board, onClick }: BoardCardProps) {
 
 ---
 
-**This prompt is ready to paste into lovable.dev. It provides comprehensive guidance for building a production-ready Sui blockchain dApp in a hackathon timeframe.**
+**This prompt is ready to paste into  It provides comprehensive guidance for building a production-ready Sui blockchain dApp in a hackathon timeframe.**
 
 **Key Strengths**:
 - ✅ Complete feature specifications

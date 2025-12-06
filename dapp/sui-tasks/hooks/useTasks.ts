@@ -1,6 +1,7 @@
 // hooks/useTasks.ts
-import { useCurrentAccount, useSuiClient } from '@mysten/dapp-kit';
+import { useCurrentAccount, useSuiClient, useSignAndExecuteTransaction } from '@mysten/dapp-kit';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Transaction } from '@mysten/sui/transactions';
 import { TASK_TYPE, PACKAGE_ID, CLOCK_ID } from '@/core/constants';
 import { parseTask } from '@/utils/sui';
 import { useToast } from './useToast';

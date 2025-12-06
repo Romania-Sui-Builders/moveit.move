@@ -59,10 +59,7 @@ export function WalletStatus() {
   const copyAddress = () => {
     if (account?.address) {
       navigator.clipboard.writeText(account.address);
-      toast({
-        title: "Address copied!",
-        description: "Wallet address copied to clipboard",
-      });
+      toast("Address copied to clipboard");
     }
   };
 
