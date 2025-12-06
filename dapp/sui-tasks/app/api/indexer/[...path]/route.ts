@@ -5,11 +5,12 @@ const INDEXER_URL = process.env.NEXT_PUBLIC_INDEXER_URL || 'http://localhost:300
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { path: string[] } }
+  { params }: { params: Promise<{ path: string[] }> }
 ) {
   try {
-    const path = params.path.join('/');
-    const url = `${INDEXER_URL}/${path}`;
+    const { path } = await params;
+    const pathString = path.join('/');
+    const url = `${INDEXER_URL}/${pathString}`;
     
     const response = await fetch(url, {
       method: 'GET',

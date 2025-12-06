@@ -199,7 +199,7 @@ export function BoardManagementExample() {
 
           {!isLoading && !error && boards && boards.length > 0 && (
             <div className="space-y-3">
-              {boards.map((board) => (
+              {boards.map((board:any) => (
                 <div
                   key={board.id}
                   className="p-4 border rounded-lg hover:bg-accent/50 transition-colors"
