@@ -4,14 +4,14 @@ export interface Board {
   name: string
   description: string
   owner?: string
-  members?: string[]
+  members?: string[] // ⚠️ NOT in contract - kept for backward compatibility with mock data
   taskIds?: string[]
   createdAt: number
-  columns?: BoardColumn[]
-  // MoveIt contract fields
-  statuses?: string[]
-  taskCounter?: number
-  version?: number
+  columns?: BoardColumn[] // ⚠️ UI representation of statuses
+  // MoveIt contract fields (actual blockchain data)
+  statuses?: string[] // ✅ Contract uses this - workflow statuses
+  taskCounter?: number // ✅ Contract uses this
+  version?: number // ✅ Contract uses this
 }
 
 export interface BoardColumn {

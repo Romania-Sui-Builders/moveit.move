@@ -12,6 +12,7 @@ import { TaskForm } from "./task-form"
 import { TaskDetail } from "./task-detail"
 import { useSWRConfig } from "swr"
 import useSWR from "swr"
+import { useContributorCapForBoard } from "@/hooks/useContributorCaps"
 
 interface TaskListProps {
   boardId: string
@@ -25,6 +26,9 @@ export function TaskList({ boardId, tasks: initialTasks, board }: TaskListProps)
   const [draggedTask, setDraggedTask] = useState<Task | null>(null)
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null)
   const { mutate } = useSWRConfig()
+  
+  // ✅ Query ContributorCap for this board
+  const { data: contributorCapId } = useContributorCapForBoard(boardId)
 
   const { data: tasks = initialTasks } = useSWR<Task[]>(`/api/tasks?boardId=${boardId}`, {
     fallbackData: initialTasks,
@@ -125,13 +129,25 @@ export function TaskList({ boardId, tasks: initialTasks, board }: TaskListProps)
           <h2 className="text-xl font-semibold">Tasks</h2>
           <p className="text-sm text-muted-foreground">{tasks.length} total tasks</p>
         </div>
-        <Button onClick={() => setShowCreateForm(true)} size="sm" className="gap-2">
+        <Button 
+          onClick={() => setShowCreateForm(true)} 
+          size="sm" 
+          className="gap-2"
+          disabled={!contributorCapId}
+          title={!contributorCapId ? "You need contributor access to create tasks" : ""}
+        >
           <Plus className="h-4 w-4" />
           Create Task
         </Button>
       </div>
 
-      {showCreateForm && <TaskForm boardId={boardId} board={board} onClose={() => setShowCreateForm(false)} />}
+      {showCreateForm && (
+        <TaskForm 
+          boardId={boardId} 
+          board={board} 
+          onClose={() => setShowCreateForm(false)}
+        />
+      )}
 
       {selectedTask && <TaskDetail task={selectedTask} board={board} onClose={() => setSelectedTask(null)} />}
 

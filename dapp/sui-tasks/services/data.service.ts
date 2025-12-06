@@ -122,6 +122,7 @@ export async function getBoard(boardId: string): Promise<Board | null> {
  */
 export async function getTasks(boardId: string): Promise<Task[]> {
   // Try indexer first
+  let indexerTasks: Task[] = [];
   try {
     const response = await fetch(`${INDEXER_URL}/api/boards/${boardId}/tasks`, {
       method: 'GET',
@@ -131,36 +132,48 @@ export async function getTasks(boardId: string): Promise<Task[]> {
 
     if (response.ok) {
       const data = await response.json();
-      console.log('✅ Tasks fetched from indexer');
-      return data.tasks || data || [];
+      indexerTasks = data.tasks || data || [];
+      console.log(`✅ Indexer responded with ${indexerTasks.length} tasks`);
+      
+      // If indexer has tasks, return them
+      if (indexerTasks.length > 0) {
+        return indexerTasks;
+      }
     }
   } catch (error) {
     console.warn('⚠️ Indexer unavailable, falling back to blockchain');
   }
 
-  // Fall back to blockchain
+  // Fall back to blockchain if indexer returned no tasks
+  console.log(`📡 Fetching tasks from blockchain for board: ${boardId}`);
   try {
-    // Get task events
-    const events = await blockchainService.getTaskEventsFromBlockchain(boardId);
+    // Fetch all tasks for the board directly
+    const blockchainTasks = await blockchainService.getTasksForBoard(boardId);
+    console.log(`🔗 Blockchain returned ${blockchainTasks.length} raw tasks`);
     
-    // Fetch full task details for each event
-    const tasks = await Promise.all(
-      events.map(async (event) => {
-        const task = await blockchainService.getTaskFromBoard(boardId, event.taskId);
-        if (task) {
-          return {
-            id: `${boardId}-${task.taskId}`,
-            ...task,
-            subtaskIds: task.subtaskIds || [],
-          } as Task;
-        }
-        return null;
-      })
-    );
+    // Transform blockchain tasks to app Task format
+    const tasks: Task[] = blockchainTasks.map(task => {
+      console.log('📝 Transforming task:', { id: task.id, taskNumber: task.taskNumber, title: task.title });
+      return {
+        id: task.id, // Task Object ID
+        boardId: task.boardId,
+        taskId: task.taskNumber, // Legacy field - task number
+        title: task.title,
+        description: task.description,
+        status: task.status,
+        assignees: task.assignees,
+        dueDate: task.dueDate,
+        effort: task.effort,
+        creator: task.creator,
+        createdAt: task.createdAt,
+        updatedAt: task.updatedAt,
+        parentTaskId: undefined, // Would need mapping
+        subtaskIds: [], // Would need mapping
+      };
+    });
 
-    const validTasks = tasks.filter((t): t is Task => t !== null);
-    console.log('✅ Tasks fetched from blockchain:', validTasks.length);
-    return validTasks;
+    console.log('✅ Tasks fetched from blockchain:', tasks.length, tasks);
+    return tasks;
   } catch (error) {
     console.error('❌ Error fetching tasks from blockchain:', error);
     return [];
@@ -188,15 +201,13 @@ export async function getTask(boardId: string, taskId: number): Promise<Task | n
     console.warn('⚠️ Indexer unavailable, falling back to blockchain');
   }
 
-  // Fall back to blockchain
+  // Fall back to blockchain - need to get all tasks and find by number
   try {
-    const task = await blockchainService.getTaskFromBoard(boardId, taskId);
+    const allTasks = await getTasks(boardId);
+    const task = allTasks.find(t => t.taskId === taskId);
     if (task) {
-      console.log('✅ Task fetched from blockchain');
-      return {
-        id: `${boardId}-${taskId}`,
-        ...task,
-      };
+      console.log('✅ Task found via board tasks fetch');
+      return task;
     }
   } catch (error) {
     console.error('❌ Error fetching task from blockchain:', error);
