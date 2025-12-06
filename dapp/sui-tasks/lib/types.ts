@@ -12,6 +12,9 @@ export interface Board {
   statuses?: string[] // ✅ Contract uses this - workflow statuses
   taskCounter?: number // ✅ Contract uses this
   version?: number // ✅ Contract uses this
+  // Legacy Table structure detection (old boards)
+  tableId?: string // ✅ Present if board uses old Table storage
+  tableSize?: number // ✅ Number of tasks in Table
 }
 
 export interface BoardColumn {

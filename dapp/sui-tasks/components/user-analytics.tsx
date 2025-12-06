@@ -5,31 +5,84 @@ import { Badge } from "@/components/ui/badge"
 import type { Board, Task } from "@/lib/types"
 import { CheckCircle2, Clock, ListTodo, Target } from "lucide-react"
 import useSWR from "swr"
-import { mockTasks } from "@/lib/mock-data"
+import { useCurrentAccount } from "@mysten/dapp-kit"
+import { useEffect, useState } from "react"
 
 interface UserAnalyticsProps {
   boards: Board[]
   tasks: Task[]
 }
 
-export function UserAnalytics({ boards, tasks: initialTasks }: UserAnalyticsProps) {
-  const { data: allTasks = mockTasks } = useSWR("/api/tasks", {
-    fallbackData: mockTasks,
-    refreshInterval: 3000,
-  })
+const fetcher = async (url: string) => {
+  const response = await fetch(url)
+  if (!response.ok) throw new Error('Failed to fetch')
+  return response.json()
+}
 
-  const tasks = initialTasks
+export function UserAnalytics({ boards }: UserAnalyticsProps) {
+  const account = useCurrentAccount()
+  const [allTasks, setAllTasks] = useState<Task[]>([])
+  const [isLoading, setIsLoading] = useState(true)
 
-  const completedTasks = tasks.filter((t) => t.status === "done")
-  const inProgressTasks = tasks.filter((t) => t.status === "in_progress")
-  const totalStoryPoints = tasks.reduce((sum, task) => sum + (task.storyPoints || 0), 0)
-  const completedStoryPoints = completedTasks.reduce((sum, task) => sum + (task.storyPoints || 0), 0)
+  // Fetch tasks from all boards
+  useEffect(() => {
+    const fetchAllTasks = async () => {
+      if (!boards || boards.length === 0) {
+        setAllTasks([])
+        setIsLoading(false)
+        return
+      }
+
+      try {
+        const taskPromises = boards.map(board => 
+          fetch(`/api/boards/${board.id}/tasks`).then(res => res.json())
+        )
+        const results = await Promise.all(taskPromises)
+        const combinedTasks = results.flatMap(result => result.tasks || [])
+        setAllTasks(combinedTasks)
+      } catch (error) {
+        console.error('Error fetching tasks:', error)
+        setAllTasks([])
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    fetchAllTasks()
+  }, [boards])
+
+  // Filter tasks assigned to current user
+  const userTasks = allTasks.filter(task => 
+    task.assignees?.includes(account?.address || '') || 
+    task.assignee === account?.address
+  )
+
+  // Match status from blockchain (e.g., "Done", "In Progress", "To Do")
+  const completedTasks = userTasks.filter((t) => 
+    t.status.toLowerCase() === "done" || t.status.toLowerCase() === "completed"
+  )
+  const inProgressTasks = userTasks.filter((t) => 
+    t.status.toLowerCase().includes("progress") || t.status.toLowerCase().includes("doing")
+  )
+  const totalEffort = userTasks.reduce((sum, task) => sum + (task.effort || task.storyPoints || 0), 0)
+  const completedEffort = completedTasks.reduce((sum, task) => sum + (task.effort || task.storyPoints || 0), 0)
 
   const priorityCounts = {
-    urgent: tasks.filter((t) => t.priority === "urgent").length,
-    high: tasks.filter((t) => t.priority === "high").length,
-    medium: tasks.filter((t) => t.priority === "medium").length,
-    low: tasks.filter((t) => t.priority === "low").length,
+    urgent: userTasks.filter((t) => t.priority === "urgent").length,
+    high: userTasks.filter((t) => t.priority === "high").length,
+    medium: userTasks.filter((t) => t.priority === "medium").length,
+    low: userTasks.filter((t) => t.priority === "low").length,
+  }
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">My Analytics</h1>
+          <p className="text-muted-foreground mt-1">Loading analytics...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -57,7 +110,7 @@ export function UserAnalytics({ boards, tasks: initialTasks }: UserAnalyticsProp
             <Target className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{tasks.length}</div>
+            <div className="text-2xl font-bold">{userTasks.length}</div>
             <p className="text-xs text-muted-foreground">{completedTasks.length} completed</p>
           </CardContent>
         </Card>
@@ -75,15 +128,15 @@ export function UserAnalytics({ boards, tasks: initialTasks }: UserAnalyticsProp
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Story Points</CardTitle>
+            <CardTitle className="text-sm font-medium">Effort Points</CardTitle>
             <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {completedStoryPoints}/{totalStoryPoints}
+              {completedEffort}/{totalEffort}
             </div>
             <p className="text-xs text-muted-foreground">
-              {totalStoryPoints > 0 ? Math.round((completedStoryPoints / totalStoryPoints) * 100) : 0}% completed
+              {totalEffort > 0 ? Math.round((completedEffort / totalEffort) * 100) : 0}% completed
             </p>
           </CardContent>
         </Card>
@@ -140,23 +193,31 @@ export function UserAnalytics({ boards, tasks: initialTasks }: UserAnalyticsProp
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {tasks
-                .sort((a, b) => b.updatedAt - a.updatedAt)
-                .slice(0, 5)
-                .map((task) => (
-                  <div key={task.id} className="flex items-start gap-3">
-                    <CheckCircle2
-                      className={`h-4 w-4 mt-1 ${task.status === "done" ? "text-green-500" : "text-muted-foreground"}`}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{task.title}</p>
-                      <p className="text-xs text-muted-foreground">{new Date(task.updatedAt).toLocaleDateString()}</p>
+              {userTasks.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">No tasks assigned yet</p>
+              ) : (
+                userTasks
+                  .sort((a, b) => b.updatedAt - a.updatedAt)
+                  .slice(0, 5)
+                  .map((task) => (
+                    <div key={task.id} className="flex items-start gap-3">
+                      <CheckCircle2
+                        className={`h-4 w-4 mt-1 ${
+                          task.status.toLowerCase() === "done" || task.status.toLowerCase() === "completed"
+                            ? "text-green-500" 
+                            : "text-muted-foreground"
+                        }`}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{task.title}</p>
+                        <p className="text-xs text-muted-foreground">{new Date(task.updatedAt).toLocaleDateString()}</p>
+                      </div>
+                      <Badge variant="outline" className="text-xs shrink-0">
+                        {task.status}
+                      </Badge>
                     </div>
-                    <Badge variant="outline" className="text-xs shrink-0">
-                      {task.status.replace("_", " ")}
-                    </Badge>
-                  </div>
-                ))}
+                  ))
+              )}
             </div>
           </CardContent>
         </Card>

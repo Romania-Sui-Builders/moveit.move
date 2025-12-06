@@ -61,6 +61,28 @@ export function TaskDetail({ task: initialTask, board, onClose }: TaskDetailProp
       alert("ContributorCap required to update tasks")
       return
     }
+
+    // ⚠️ Check if board uses old Table structure
+    console.log("🔍 Board structure check:", {
+      boardId: board.id,
+      hasTableId: !!board.tableId,
+      hasTaskIds: !!board.taskIds,
+      boardVersion: board.version,
+      tableId: board.tableId,
+      tableSize: board.tableSize
+    });
+
+    if (board.tableId) {
+      alert(
+        "⚠️ Update Not Supported - Legacy Board\n\n" +
+        "This board uses the old Table storage structure.\n" +
+        "Task updates are only supported on boards created with the new contract.\n\n" +
+        `Board ID: ${board.id}\n` +
+        `Table ID: ${board.tableId}\n\n` +
+        "Please create a NEW board using the current contract deployment."
+      )
+      return
+    }
     
     setIsSubmitting(true)
 
@@ -159,6 +181,20 @@ export function TaskDetail({ task: initialTask, board, onClose }: TaskDetailProp
             </AlertDescription>
           </Alert>
         )}
+
+        {/* ⚠️ Warning when board uses old Table structure */}
+        {board.tableId && (
+          <Alert className="mb-4 border-amber-500 bg-amber-50">
+            <AlertCircle className="h-4 w-4 text-amber-600" />
+            <AlertDescription className="text-amber-800">
+              <strong>Legacy Board:</strong> This board uses older storage architecture. Task updates and deletions are not supported.
+              <br />
+              <span className="text-sm">
+                💡 To enable full functionality, create a new board from the home page. You can view this board's tasks but cannot modify them.
+              </span>
+            </AlertDescription>
+          </Alert>
+        )}
         
         <div className="flex items-center justify-between">
           <div className="flex-1">
@@ -194,7 +230,8 @@ export function TaskDetail({ task: initialTask, board, onClose }: TaskDetailProp
                   variant="outline" 
                   size="icon" 
                   onClick={() => setIsEditing(true)}
-                  disabled={!contributorCapId}
+                  disabled={!contributorCapId || !!board.tableId}
+                  title={board.tableId ? "Updates not supported on legacy boards" : ""}
                 >
                   <Pencil className="h-4 w-4" />
                 </Button>
@@ -202,7 +239,8 @@ export function TaskDetail({ task: initialTask, board, onClose }: TaskDetailProp
                   variant="destructive" 
                   size="icon" 
                   onClick={handleDelete} 
-                  disabled={isDeleting || !contributorCapId}
+                  disabled={isDeleting || !contributorCapId || !!board.tableId}
+                  title={board.tableId ? "Deletion not supported on legacy boards" : ""}
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>

@@ -121,6 +121,24 @@ export function BoardDetail({ boardId }: BoardDetailProps) {
         />
       )}
 
+      {/* ⚠️ Legacy board warning */}
+      {board.tableId && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+          <div className="flex items-start gap-3">
+            <div className="text-amber-600 mt-0.5">⚠️</div>
+            <div className="flex-1">
+              <h3 className="font-semibold text-amber-900 mb-1">Legacy Board Detected</h3>
+              <p className="text-sm text-amber-800 mb-2">
+                This board uses older storage architecture. You can view and create tasks, but updates and deletions are not supported.
+              </p>
+              <p className="text-sm text-amber-700">
+                💡 <strong>Recommendation:</strong> Create a new board to access full task management features including updates, deletions, and future enhancements.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <Tabs defaultValue="tasks" className="w-full">
         <TabsList>
           <TabsTrigger value="tasks">Tasks</TabsTrigger>

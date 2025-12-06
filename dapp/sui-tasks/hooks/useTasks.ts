@@ -134,24 +134,38 @@ export function useUpdateTask() {
         boardId,
         contributorCapId,
         updates,
+        packageId: PACKAGE_ID,
       });
+
+      // CRITICAL: Check if task exists as a separate object
+      // For boards with task_ids vector, tasks should be separate objects
+      // For boards with Table structure, this won't work
+      try {
+        const suiClient = await import('@mysten/dapp-kit').then(m => m.useSuiClient);
+        // Note: We can't call hooks here, so we'll proceed with the transaction
+      } catch (e) {
+        console.warn("Could not validate task object:", e);
+      }
 
       // Update task using MoveIt contract
       const tx = new Transaction();
 
+      // All objects use tx.object() - SDK resolves shared vs owned automatically
       tx.moveCall({
         target: `${PACKAGE_ID}::moveit::update_task`,
         arguments: [
-          tx.object(contributorCapId),
-          tx.object(boardId),
-          tx.object(taskObjectId), // ✅ Task Object ID
+          tx.object(contributorCapId), // ContributorCap (owned by user)
+          tx.object(boardId),          // Board (shared, immutable ref &Board)
+          tx.object(taskObjectId),     // Task (shared, mutable ref &mut Task)
           tx.pure.string(updates.title || ""),
           tx.pure.string(updates.description || ""),
           tx.pure.u64(updates.dueDate || 0),
           tx.pure.u64(updates.effortHours || 0),
-          tx.object(CLOCK_ID),
+          tx.object(CLOCK_ID),         // Clock (shared)
         ],
       });
+
+      console.log("📤 Transaction built, sending to wallet...");
 
       try {
         const result = await signAndExecute({ transaction: tx });
@@ -159,6 +173,7 @@ export function useUpdateTask() {
         return result;
       } catch (error) {
         console.error("❌ Task update transaction failed:", error);
+        console.error("Error details:", JSON.stringify(error, null, 2));
         throw error;
       }
     },

@@ -89,6 +89,10 @@ export async function getBoardFromBlockchain(boardId: string): Promise<Blockchai
     // Handle both old Table structure and new task_ids vector
     let taskIds: string[] = [];
     
+    console.log('🔍 Checking board structure:');
+    console.log('  - Has task_ids field:', !!fields.task_ids);
+    console.log('  - Has tasks (Table) field:', !!fields.tasks);
+    
     if (fields.task_ids) {
       // New structure: task_ids vector
       console.log('✅ Using new task_ids vector structure');
@@ -106,8 +110,14 @@ export async function getBoardFromBlockchain(boardId: string): Promise<Blockchai
       // We'll need to query the table's dynamic fields
       // For now, store the table info so we can query it
       taskIds = []; // Will be populated by querying table dynamic fields
+    } else {
+      console.log('⚠️ Board has neither task_ids nor tasks field - this is unexpected!');
     }
 
+    // Only set tableId/tableSize if board actually uses Table structure (old boards)
+    // New boards have task_ids field, old boards have tasks (Table) field
+    const usesTableStructure = fields.tasks && !fields.task_ids;
+    
     const board = {
       id: boardId,
       name: fields.name || '',
@@ -115,13 +125,15 @@ export async function getBoardFromBlockchain(boardId: string): Promise<Blockchai
       statuses: fields.statuses || [],
       taskCounter: parseInt(fields.task_counter || '0'),
       taskIds: taskIds,
-      tableId: fields.tasks?.fields?.id?.id, // Store table ID if using old structure
-      tableSize: fields.tasks ? parseInt(fields.tasks.fields.size || '0') : 0,
+      // Only set these for legacy boards with Table structure
+      tableId: usesTableStructure ? fields.tasks?.fields?.id?.id : undefined,
+      tableSize: usesTableStructure ? parseInt(fields.tasks.fields.size || '0') : undefined,
       createdAt: parseInt(fields.created_at || '0'),
       version: parseInt(fields.version || '1'),
     };
     
     console.log('✅ Parsed board:', JSON.stringify(board, null, 2));
+    console.log(`🔍 Board structure: ${usesTableStructure ? 'LEGACY (Table)' : 'MODERN (task_ids)'}`);
     return board;
   } catch (error) {
     console.error('Error fetching board from blockchain:', error);
