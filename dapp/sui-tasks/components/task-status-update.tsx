@@ -1,7 +1,7 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-import { Circle, Clock, CheckCircle2 } from "lucide-react"
+import { Circle, Clock, CheckCircle2, type LucideIcon } from "lucide-react"
 import type { Task } from "@/lib/types"
 
 interface TaskStatusUpdateProps {
@@ -15,13 +15,13 @@ const statusFlow: Record<Task["status"], Task["status"] | null> = {
   done: null,
 }
 
-const statusIcons = {
+const statusIcons: Record<Task["status"], LucideIcon> = {
   todo: Circle,
   in_progress: Clock,
   done: CheckCircle2,
 }
 
-const statusLabels = {
+const statusLabels: Record<Task["status"], string> = {
   todo: "Start Task",
   in_progress: "Complete Task",
   done: "Completed",
