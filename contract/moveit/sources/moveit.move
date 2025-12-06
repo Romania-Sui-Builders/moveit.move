@@ -4,12 +4,12 @@
 /// Supports boards with configurable workflows, role-based access control, 
 /// and full task lifecycle management.
 /// 
+/// Tasks are now separate objects that can be looked up globally by their Object ID.
 /// This contract is upgradeable and uses versioned objects for future-proofing.
 module moveit::moveit;
 
 use std::string::String;
 use sui::event;
-use sui::table::{Self, Table};
 use sui::clock::Clock;
 use sui::package;
 use sui::dynamic_field;
@@ -21,7 +21,6 @@ const VERSION: u64 = 1;
 // ===== Error Codes =====
 const EInvalidBoardId: u64 = 0;
 const EInvalidStatus: u64 = 1;
-const ETaskNotFound: u64 = 2;
 const EStatusAlreadyExists: u64 = 3;
 const EStatusNotFound: u64 = 4;
 const ECannotRemoveLastStatus: u64 = 5;
@@ -29,8 +28,8 @@ const ENoStatusesDefined: u64 = 6;
 const EWrongVersion: u64 = 7;
 const ENotUpgraded: u64 = 8;
 const EInvalidDueDate: u64 = 9;
-const EParentTaskNotFound: u64 = 10;
 const ECannotNestSubtasks: u64 = 11;
+const ETaskBoardMismatch: u64 = 12;
 
 // ===== One-Time Witness =====
 
@@ -60,17 +59,21 @@ public struct Board has key, store {
     statuses: vector<String>,
     /// Counter for generating unique task IDs within the board
     task_counter: u64,
-    /// All tasks in this board (task_id -> Task)
-    tasks: Table<u64, Task>,
+    /// Object IDs of all tasks in this board
+    task_ids: vector<ID>,
     /// Timestamp of board creation
     created_at: u64,
 }
 
 /// Task represents a unit of work within a board.
+/// Tasks are now separate objects with global Object IDs.
 /// Supports hierarchical structure with parent/child relationships.
-public struct Task has store {
-    /// Unique task ID within the board
-    task_id: u64,
+public struct Task has key, store {
+    id: UID,
+    /// The board this task belongs to
+    board_id: ID,
+    /// Sequential task number within the board (for display purposes)
+    task_number: u64,
     /// Task title
     title: String,
     /// Detailed description of the task
@@ -89,10 +92,10 @@ public struct Task has store {
     created_at: u64,
     /// Timestamp of last update
     updated_at: u64,
-    /// Optional parent task ID (for subtasks)
-    parent_task_id: Option<u64>,
-    /// List of subtask IDs
-    subtask_ids: vector<u64>,
+    /// Optional parent task Object ID (for subtasks)
+    parent_task_id: Option<ID>,
+    /// Object IDs of subtasks
+    subtask_ids: vector<ID>,
 }
 
 /// Contributor capability - given to team members for a specific board.
@@ -132,20 +135,21 @@ public struct ContributorAdded has copy, drop {
 
 public struct TaskCreated has copy, drop {
     board_id: ID,
-    task_id: u64,
+    task_id: ID,
+    task_number: u64,
     title: String,
     creator: address,
 }
 
 public struct TaskUpdated has copy, drop {
     board_id: ID,
-    task_id: u64,
+    task_id: ID,
     updated_by: address,
 }
 
 public struct TaskStatusChanged has copy, drop {
     board_id: ID,
-    task_id: u64,
+    task_id: ID,
     old_status: String,
     new_status: String,
     changed_by: address,
@@ -153,7 +157,7 @@ public struct TaskStatusChanged has copy, drop {
 
 public struct TaskAssigned has copy, drop {
     board_id: ID,
-    task_id: u64,
+    task_id: ID,
     assignees: vector<address>,
     assigned_by: address,
 }
@@ -167,8 +171,8 @@ public struct BoardMigrated has copy, drop {
 
 public struct SubtaskCreated has copy, drop {
     board_id: ID,
-    parent_task_id: u64,
-    subtask_id: u64,
+    parent_task_id: ID,
+    subtask_id: ID,
     title: String,
     creator: address,
 }
@@ -190,6 +194,16 @@ fun init(otw: MOVEIT, ctx: &mut TxContext) {
     board_display.add(b"image_url".to_string(), b"https://moveit.sui/board.png".to_string());
     board_display.update_version();
     transfer::public_transfer(board_display, ctx.sender());
+    
+    // Create Display for Task
+    let mut task_display = display::new<Task>(&publisher, ctx);
+    task_display.add(b"name".to_string(), b"{title}".to_string());
+    task_display.add(b"description".to_string(), b"{description}".to_string());
+    task_display.add(b"status".to_string(), b"{status}".to_string());
+    task_display.add(b"project_url".to_string(), b"https://moveit.sui".to_string());
+    task_display.add(b"image_url".to_string(), b"https://moveit.sui/task.png".to_string());
+    task_display.update_version();
+    transfer::public_transfer(task_display, ctx.sender());
     
     // Create Display for ContributorCap
     let mut cap_display = display::new<ContributorCap>(&publisher, ctx);
@@ -236,9 +250,6 @@ public fun migrate_board(
     let old_version = board.version;
     assert!(old_version < VERSION, ENotUpgraded);
     
-    // Version 1 -> 2 migration logic would go here
-    // Example: if (old_version == 1) { ... migrate to v2 ... }
-    
     board.version = VERSION;
     
     event::emit(BoardMigrated {
@@ -276,7 +287,7 @@ public fun create_board(
         description,
         statuses: initial_statuses,
         task_counter: 0,
-        tasks: table::new<u64, Task>(ctx),
+        task_ids: vector[],
         created_at: clock.timestamp_ms(),
     };
     
@@ -427,6 +438,7 @@ public fun has_board_field(board: &Board, key: String): bool {
 // Admin can create a ContributorCap for themselves to perform these operations.
 
 /// Create a new task. Task starts with the first status in the workflow.
+/// Returns the Object ID of the created task.
 public fun create_task(
     cap: &ContributorCap,
     board: &mut Board,
@@ -436,18 +448,64 @@ public fun create_task(
     effort: u64,
     assignees: vector<address>,
     clock: &Clock,
-    ctx: &TxContext,
-): u64 {
+    ctx: &mut TxContext,
+): ID {
     assert!(cap.board_id == object::id(board), EInvalidBoardId);
     assert_current_version(board);
-    create_task_internal(board, title, description, due_date, effort, assignees, clock, ctx)
+    
+    let sender = ctx.sender();
+    assert!(!board.statuses.is_empty(), ENoStatusesDefined);
+    
+    let task_number = board.task_counter;
+    board.task_counter = task_number + 1;
+    
+    let now = clock.timestamp_ms();
+    
+    // Validate due_date: must be 0 (no due date) or in the future
+    assert!(due_date == 0 || due_date > now, EInvalidDueDate);
+    
+    // New tasks start with the first status in the workflow
+    let initial_status = *board.statuses.borrow(0);
+    let board_id = object::id(board);
+    
+    let task = Task {
+        id: object::new(ctx),
+        board_id,
+        task_number,
+        title,
+        description,
+        due_date,
+        status: initial_status,
+        effort,
+        assignees,
+        creator: sender,
+        created_at: now,
+        updated_at: now,
+        parent_task_id: option::none(),
+        subtask_ids: vector[],
+    };
+    
+    let task_id = object::id(&task);
+    board.task_ids.push_back(task_id);
+    
+    event::emit(TaskCreated {
+        board_id,
+        task_id,
+        task_number,
+        title: task.title,
+        creator: sender,
+    });
+    
+    transfer::share_object(task);
+    
+    task_id
 }
 
 /// Update task details
 public fun update_task(
     cap: &ContributorCap,
-    board: &mut Board,
-    task_id: u64,
+    board: &Board,
+    task: &mut Task,
     title: String,
     description: String,
     due_date: u64,
@@ -456,54 +514,149 @@ public fun update_task(
     ctx: &TxContext,
 ) {
     assert!(cap.board_id == object::id(board), EInvalidBoardId);
+    assert!(task.board_id == object::id(board), ETaskBoardMismatch);
     assert_current_version(board);
-    update_task_internal(board, task_id, title, description, due_date, effort, clock, ctx);
+    
+    let sender = ctx.sender();
+    let now = clock.timestamp_ms();
+    
+    // Validate due_date: must be 0 (no due date) or in the future
+    assert!(due_date == 0 || due_date > now, EInvalidDueDate);
+    
+    task.title = title;
+    task.description = description;
+    task.due_date = due_date;
+    task.effort = effort;
+    task.updated_at = now;
+    
+    event::emit(TaskUpdated {
+        board_id: task.board_id,
+        task_id: object::id(task),
+        updated_by: sender,
+    });
 }
 
 /// Update task status
 public fun update_task_status(
     cap: &ContributorCap,
-    board: &mut Board,
-    task_id: u64,
+    board: &Board,
+    task: &mut Task,
     new_status: String,
     clock: &Clock,
     ctx: &TxContext,
 ) {
     assert!(cap.board_id == object::id(board), EInvalidBoardId);
+    assert!(task.board_id == object::id(board), ETaskBoardMismatch);
     assert_current_version(board);
-    update_task_status_internal(board, task_id, new_status, clock, ctx);
+    assert!(vector_contains_string(&board.statuses, &new_status), EInvalidStatus);
+    
+    let sender = ctx.sender();
+    let old_status = task.status;
+    task.status = new_status;
+    task.updated_at = clock.timestamp_ms();
+    
+    event::emit(TaskStatusChanged {
+        board_id: task.board_id,
+        task_id: object::id(task),
+        old_status,
+        new_status: task.status,
+        changed_by: sender,
+    });
 }
 
 /// Assign users to a task
 public fun assign_task(
     cap: &ContributorCap,
-    board: &mut Board,
-    task_id: u64,
+    board: &Board,
+    task: &mut Task,
     assignees: vector<address>,
     clock: &Clock,
     ctx: &TxContext,
 ) {
     assert!(cap.board_id == object::id(board), EInvalidBoardId);
+    assert!(task.board_id == object::id(board), ETaskBoardMismatch);
     assert_current_version(board);
-    assign_task_internal(board, task_id, assignees, clock, ctx);
+    
+    let sender = ctx.sender();
+    task.assignees = assignees;
+    task.updated_at = clock.timestamp_ms();
+    
+    event::emit(TaskAssigned {
+        board_id: task.board_id,
+        task_id: object::id(task),
+        assignees: task.assignees,
+        assigned_by: sender,
+    });
 }
 
 /// Create a subtask under a parent task
 public fun create_subtask(
     cap: &ContributorCap,
     board: &mut Board,
-    parent_task_id: u64,
+    parent_task: &mut Task,
     title: String,
     description: String,
     due_date: u64,
     effort: u64,
     assignees: vector<address>,
     clock: &Clock,
-    ctx: &TxContext,
-): u64 {
+    ctx: &mut TxContext,
+): ID {
     assert!(cap.board_id == object::id(board), EInvalidBoardId);
+    assert!(parent_task.board_id == object::id(board), ETaskBoardMismatch);
     assert_current_version(board);
-    create_subtask_internal(board, parent_task_id, title, description, due_date, effort, assignees, clock, ctx)
+    
+    // Check that parent is not itself a subtask (only one level of nesting allowed)
+    assert!(option::is_none(&parent_task.parent_task_id), ECannotNestSubtasks);
+    
+    let sender = ctx.sender();
+    assert!(!board.statuses.is_empty(), ENoStatusesDefined);
+    
+    let task_number = board.task_counter;
+    board.task_counter = task_number + 1;
+    
+    let now = clock.timestamp_ms();
+    
+    // Validate due_date: must be 0 (no due date) or in the future
+    assert!(due_date == 0 || due_date > now, EInvalidDueDate);
+    
+    // Subtasks start with the first status in the workflow
+    let initial_status = *board.statuses.borrow(0);
+    let board_id = object::id(board);
+    let parent_task_oid = object::id(parent_task);
+    
+    let subtask = Task {
+        id: object::new(ctx),
+        board_id,
+        task_number,
+        title,
+        description,
+        due_date,
+        status: initial_status,
+        effort,
+        assignees,
+        creator: sender,
+        created_at: now,
+        updated_at: now,
+        parent_task_id: option::some(parent_task_oid),
+        subtask_ids: vector[],
+    };
+    
+    let subtask_id = object::id(&subtask);
+    board.task_ids.push_back(subtask_id);
+    parent_task.subtask_ids.push_back(subtask_id);
+    
+    event::emit(SubtaskCreated {
+        board_id,
+        parent_task_id: parent_task_oid,
+        subtask_id,
+        title: subtask.title,
+        creator: sender,
+    });
+    
+    transfer::share_object(subtask);
+    
+    subtask_id
 }
 
 // ===== View Functions =====
@@ -518,31 +671,14 @@ public fun get_board_statuses(board: &Board): vector<String> {
     board.statuses
 }
 
+/// Get all task Object IDs in a board
+public fun get_board_task_ids(board: &Board): vector<ID> {
+    board.task_ids
+}
+
 /// Check if a status is valid for the board
 public fun is_valid_status(board: &Board, status: &String): bool {
     vector_contains_string(&board.statuses, status)
-}
-
-/// Check if a task exists
-public fun task_exists(board: &Board, task_id: u64): bool {
-    board.tasks.contains(task_id)
-}
-
-/// Get task info
-public fun get_task_info(board: &Board, task_id: u64): (String, String, u64, String, u64, vector<address>, address, u64, u64) {
-    assert!(board.tasks.contains(task_id), ETaskNotFound);
-    let task = board.tasks.borrow(task_id);
-    (
-        task.title,
-        task.description,
-        task.due_date,
-        task.status,
-        task.effort,
-        task.assignees,
-        task.creator,
-        task.created_at,
-        task.updated_at
-    )
 }
 
 /// Get total task count
@@ -560,244 +696,59 @@ public fun is_valid_contributor_cap(board: &Board, cap: &ContributorCap): bool {
     cap.board_id == object::id(board)
 }
 
-/// Get parent task ID (returns none if this is a root task)
-public fun get_parent_task_id(board: &Board, task_id: u64): Option<u64> {
-    assert!(board.tasks.contains(task_id), ETaskNotFound);
-    let task = board.tasks.borrow(task_id);
+// ===== Task View Functions =====
+
+/// Get the board ID that a task belongs to
+public fun get_task_board_id(task: &Task): ID {
+    task.board_id
+}
+
+/// Get task info
+public fun get_task_info(task: &Task): (String, String, u64, String, u64, vector<address>, address, u64, u64) {
+    (
+        task.title,
+        task.description,
+        task.due_date,
+        task.status,
+        task.effort,
+        task.assignees,
+        task.creator,
+        task.created_at,
+        task.updated_at
+    )
+}
+
+/// Get task number (sequential within board)
+public fun get_task_number(task: &Task): u64 {
+    task.task_number
+}
+
+/// Get parent task Object ID (returns none if this is a root task)
+public fun get_parent_task_id(task: &Task): Option<ID> {
     task.parent_task_id
 }
 
-/// Get subtask IDs for a task
-public fun get_subtask_ids(board: &Board, task_id: u64): vector<u64> {
-    assert!(board.tasks.contains(task_id), ETaskNotFound);
-    let task = board.tasks.borrow(task_id);
+/// Get subtask Object IDs for a task
+public fun get_subtask_ids(task: &Task): vector<ID> {
     task.subtask_ids
 }
 
 /// Check if a task is a subtask
-public fun is_subtask(board: &Board, task_id: u64): bool {
-    assert!(board.tasks.contains(task_id), ETaskNotFound);
-    let task = board.tasks.borrow(task_id);
+public fun is_subtask(task: &Task): bool {
     option::is_some(&task.parent_task_id)
 }
 
 /// Check if a task has subtasks
-public fun has_subtasks(board: &Board, task_id: u64): bool {
-    assert!(board.tasks.contains(task_id), ETaskNotFound);
-    let task = board.tasks.borrow(task_id);
+public fun has_subtasks(task: &Task): bool {
     !task.subtask_ids.is_empty()
 }
 
 /// Get subtask count for a task
-public fun get_subtask_count(board: &Board, task_id: u64): u64 {
-    assert!(board.tasks.contains(task_id), ETaskNotFound);
-    let task = board.tasks.borrow(task_id);
+public fun get_subtask_count(task: &Task): u64 {
     (task.subtask_ids.length() as u64)
 }
 
 // ===== Internal Helper Functions =====
-
-/// Internal function to create a task
-fun create_task_internal(
-    board: &mut Board,
-    title: String,
-    description: String,
-    due_date: u64,
-    effort: u64,
-    assignees: vector<address>,
-    clock: &Clock,
-    ctx: &TxContext,
-): u64 {
-    let sender = ctx.sender();
-    assert!(!board.statuses.is_empty(), ENoStatusesDefined);
-    
-    let task_id = board.task_counter;
-    board.task_counter = task_id + 1;
-    
-    let now = clock.timestamp_ms();
-    
-    // Validate due_date: must be 0 (no due date) or in the future
-    assert!(due_date == 0 || due_date > now, EInvalidDueDate);
-    
-    // New tasks start with the first status in the workflow
-    let initial_status = *board.statuses.borrow(0);
-    
-    let task = Task {
-        task_id,
-        title,
-        description,
-        due_date,
-        status: initial_status,
-        effort,
-        assignees,
-        creator: sender,
-        created_at: now,
-        updated_at: now,
-        parent_task_id: option::none(),
-        subtask_ids: vector[],
-    };
-    
-    board.tasks.add(task_id, task);
-    
-    event::emit(TaskCreated {
-        board_id: object::id(board),
-        task_id,
-        title: board.tasks.borrow(task_id).title,
-        creator: sender,
-    });
-    
-    task_id
-}
-
-/// Internal function to create a subtask
-fun create_subtask_internal(
-    board: &mut Board,
-    parent_task_id: u64,
-    title: String,
-    description: String,
-    due_date: u64,
-    effort: u64,
-    assignees: vector<address>,
-    clock: &Clock,
-    ctx: &TxContext,
-): u64 {
-    let sender = ctx.sender();
-    assert!(!board.statuses.is_empty(), ENoStatusesDefined);
-    assert!(board.tasks.contains(parent_task_id), EParentTaskNotFound);
-    
-    // Check that parent is not itself a subtask (only one level of nesting allowed)
-    {
-        let parent_task = board.tasks.borrow(parent_task_id);
-        assert!(option::is_none(&parent_task.parent_task_id), ECannotNestSubtasks);
-    };
-    
-    let subtask_id = board.task_counter;
-    board.task_counter = subtask_id + 1;
-    
-    let now = clock.timestamp_ms();
-    
-    // Validate due_date: must be 0 (no due date) or in the future
-    assert!(due_date == 0 || due_date > now, EInvalidDueDate);
-    
-    // Subtasks start with the first status in the workflow
-    let initial_status = *board.statuses.borrow(0);
-    
-    let subtask = Task {
-        task_id: subtask_id,
-        title,
-        description,
-        due_date,
-        status: initial_status,
-        effort,
-        assignees,
-        creator: sender,
-        created_at: now,
-        updated_at: now,
-        parent_task_id: option::some(parent_task_id),
-        subtask_ids: vector[],
-    };
-    
-    board.tasks.add(subtask_id, subtask);
-    
-    // Add subtask ID to parent's subtask_ids list
-    let parent_task = board.tasks.borrow_mut(parent_task_id);
-    parent_task.subtask_ids.push_back(subtask_id);
-    
-    event::emit(SubtaskCreated {
-        board_id: object::id(board),
-        parent_task_id,
-        subtask_id,
-        title: board.tasks.borrow(subtask_id).title,
-        creator: sender,
-    });
-    
-    subtask_id
-}
-
-/// Internal function to update task details
-fun update_task_internal(
-    board: &mut Board,
-    task_id: u64,
-    title: String,
-    description: String,
-    due_date: u64,
-    effort: u64,
-    clock: &Clock,
-    ctx: &TxContext,
-) {
-    let sender = ctx.sender();
-    let board_id = object::id(board);
-    assert!(board.tasks.contains(task_id), ETaskNotFound);
-    
-    let now = clock.timestamp_ms();
-    
-    // Validate due_date: must be 0 (no due date) or in the future
-    assert!(due_date == 0 || due_date > now, EInvalidDueDate);
-    
-    let task = board.tasks.borrow_mut(task_id);
-    task.title = title;
-    task.description = description;
-    task.due_date = due_date;
-    task.effort = effort;
-    task.updated_at = now;
-    
-    event::emit(TaskUpdated {
-        board_id,
-        task_id,
-        updated_by: sender,
-    });
-}
-
-/// Internal function to update task status
-fun update_task_status_internal(
-    board: &mut Board,
-    task_id: u64,
-    new_status: String,
-    clock: &Clock,
-    ctx: &TxContext,
-) {
-    let sender = ctx.sender();
-    let board_id = object::id(board);
-    assert!(board.tasks.contains(task_id), ETaskNotFound);
-    assert!(vector_contains_string(&board.statuses, &new_status), EInvalidStatus);
-    
-    let task = board.tasks.borrow_mut(task_id);
-    let old_status = task.status;
-    task.status = new_status;
-    task.updated_at = clock.timestamp_ms();
-    
-    event::emit(TaskStatusChanged {
-        board_id,
-        task_id,
-        old_status,
-        new_status: task.status,
-        changed_by: sender,
-    });
-}
-
-/// Internal function to assign task
-fun assign_task_internal(
-    board: &mut Board,
-    task_id: u64,
-    assignees: vector<address>,
-    clock: &Clock,
-    ctx: &TxContext,
-) {
-    let sender = ctx.sender();
-    let board_id = object::id(board);
-    assert!(board.tasks.contains(task_id), ETaskNotFound);
-    
-    let task = board.tasks.borrow_mut(task_id);
-    task.assignees = assignees;
-    task.updated_at = clock.timestamp_ms();
-    
-    event::emit(TaskAssigned {
-        board_id,
-        task_id,
-        assignees: task.assignees,
-        assigned_by: sender,
-    });
-}
 
 /// Check if a vector contains a string
 fun vector_contains_string(vec: &vector<String>, value: &String): bool {

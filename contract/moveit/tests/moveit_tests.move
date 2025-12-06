@@ -4,6 +4,7 @@ module moveit::moveit_tests;
 use moveit::moveit::{
     Self,
     Board,
+    Task,
     AdminCap,
     ContributorCap,
     create_board,
@@ -19,12 +20,14 @@ use moveit::moveit::{
     burn_contributor_cap,
     get_board_info,
     get_board_statuses,
+    get_board_task_ids,
     get_task_info,
     get_task_count,
+    get_task_board_id,
+    get_task_number,
     get_contributor_cap_board_id,
     is_valid_contributor_cap,
     is_valid_status,
-    task_exists,
     get_parent_task_id,
     get_subtask_ids,
     is_subtask,
@@ -66,7 +69,7 @@ fun default_statuses(): vector<String> {
 // ===== Board Creation Tests =====
 
 #[test]
-fun test_admin_create_board() {
+fun test_create_board() {
     let mut scenario = setup_test();
     let clock = create_test_clock(&mut scenario);
     
@@ -104,6 +107,10 @@ fun test_admin_create_board() {
         assert!(is_valid_status(&board, &string::utf8(b"To-Do")));
         assert!(is_valid_status(&board, &string::utf8(b"In-Progress")));
         assert!(is_valid_status(&board, &string::utf8(b"Done")));
+        
+        // Verify no tasks yet
+        let task_ids = get_board_task_ids(&board);
+        assert!(task_ids.is_empty());
         
         ts::return_shared(board);
     };
@@ -365,30 +372,47 @@ fun test_create_task() {
             &mut board,
             string::utf8(b"Implement feature X"),
             string::utf8(b"Detailed description of feature X"),
-            1735689600000,
+            1865756800000, // Future date
             5,
             vector[ADMIN],
             &clock,
             ts::ctx(&mut scenario)
         );
         
-        assert!(task_id == 0);
         assert!(get_task_count(&board) == 1);
-        assert!(task_exists(&board, 0));
         
-        // Verify task info - should start with first status "To-Do"
+        // Verify task ID is in board
+        let task_ids = get_board_task_ids(&board);
+        assert!(task_ids.length() == 1);
+        assert!(*task_ids.borrow(0) == task_id);
+        
+        burn_contributor_cap(contributor_cap);
+        ts::return_shared(board);
+    };
+    
+    // Verify task object
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let board = ts::take_shared<Board>(&scenario);
+        let task = ts::take_shared<Task>(&scenario);
+        
+        // Verify task info
         let (title, description, due_date, status, effort, assignees, creator, _created_at, _updated_at) = 
-            get_task_info(&board, task_id);
+            get_task_info(&task);
         
         assert!(title == string::utf8(b"Implement feature X"));
         assert!(description == string::utf8(b"Detailed description of feature X"));
-        assert!(due_date == 1735689600000);
+        assert!(due_date == 1865756800000);
         assert!(status == string::utf8(b"To-Do"));
         assert!(effort == 5);
         assert!(assignees == vector[ADMIN]);
         assert!(creator == ADMIN);
         
-        burn_contributor_cap(contributor_cap);
+        // Verify task knows its board
+        assert!(get_task_board_id(&task) == object::id(&board));
+        assert!(get_task_number(&task) == 0);
+        
+        ts::return_shared(task);
         ts::return_shared(board);
     };
     
@@ -429,7 +453,7 @@ fun test_contributor_create_task() {
         let mut board = ts::take_shared<Board>(&scenario);
         let contributor_cap = ts::take_from_sender<ContributorCap>(&scenario);
         
-        let task_id = create_task(
+        create_task(
             &contributor_cap,
             &mut board,
             string::utf8(b"Bug fix"),
@@ -441,14 +465,19 @@ fun test_contributor_create_task() {
             ts::ctx(&mut scenario)
         );
         
-        assert!(task_id == 0);
-        
-        // Verify task starts with first status
-        let (_, _, _, status, _, _, _, _, _) = get_task_info(&board, task_id);
-        assert!(status == string::utf8(b"To-Do"));
-        
         ts::return_to_sender(&scenario, contributor_cap);
         ts::return_shared(board);
+    };
+    
+    // Verify task
+    ts::next_tx(&mut scenario, CONTRIBUTOR1);
+    {
+        let task = ts::take_shared<Task>(&scenario);
+        
+        let (_, _, _, status, _, _, _, _, _) = get_task_info(&task);
+        assert!(status == string::utf8(b"To-Do"));
+        
+        ts::return_shared(task);
     };
     
     clock.destroy_for_testing();
@@ -468,7 +497,7 @@ fun test_update_task() {
         transfer::public_transfer(admin_cap, ADMIN);
     };
     
-    // Create and update task
+    // Create task
     ts::next_tx(&mut scenario, ADMIN);
     {
         let mut board = ts::take_shared<Board>(&scenario);
@@ -486,26 +515,38 @@ fun test_update_task() {
             ts::ctx(&mut scenario)
         );
         
+        burn_contributor_cap(contributor_cap);
+        ts::return_shared(board);
+    };
+    
+    // Update task
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let board = ts::take_shared<Board>(&scenario);
+        let mut task = ts::take_shared<Task>(&scenario);
+        let contributor_cap = create_contributor_cap_for_testing(&board, ts::ctx(&mut scenario));
+        
         update_task(
             &contributor_cap,
-            &mut board,
-            0,
+            &board,
+            &mut task,
             string::utf8(b"Updated title"),
             string::utf8(b"Updated description"),
-            1735689600000,
+            1865756800000,
             8,
             &clock,
             ts::ctx(&mut scenario)
         );
         
-        let (title, description, due_date, _, effort, _, _, _, _) = get_task_info(&board, 0);
+        let (title, description, due_date, _, effort, _, _, _, _) = get_task_info(&task);
         
         assert!(title == string::utf8(b"Updated title"));
         assert!(description == string::utf8(b"Updated description"));
-        assert!(due_date == 1735689600000);
+        assert!(due_date == 1865756800000);
         assert!(effort == 8);
         
         burn_contributor_cap(contributor_cap);
+        ts::return_shared(task);
         ts::return_shared(board);
     };
     
@@ -526,7 +567,7 @@ fun test_update_task_status_flow() {
         transfer::public_transfer(admin_cap, ADMIN);
     };
     
-    // Create task and update status through workflow
+    // Create task
     ts::next_tx(&mut scenario, ADMIN);
     {
         let mut board = ts::take_shared<Board>(&scenario);
@@ -544,86 +585,32 @@ fun test_update_task_status_flow() {
             ts::ctx(&mut scenario)
         );
         
-        let (_, _, _, status, _, _, _, _, _) = get_task_info(&board, 0);
-        assert!(status == string::utf8(b"To-Do"));
-        
-        // Update to In-Progress
-        update_task_status(&contributor_cap, &mut board, 0, string::utf8(b"In-Progress"), &clock, ts::ctx(&mut scenario));
-        let (_, _, _, new_status, _, _, _, _, _) = get_task_info(&board, 0);
-        assert!(new_status == string::utf8(b"In-Progress"));
-        
-        // Update to Done
-        update_task_status(&contributor_cap, &mut board, 0, string::utf8(b"Done"), &clock, ts::ctx(&mut scenario));
-        let (_, _, _, final_status, _, _, _, _, _) = get_task_info(&board, 0);
-        assert!(final_status == string::utf8(b"Done"));
-        
         burn_contributor_cap(contributor_cap);
         ts::return_shared(board);
     };
     
-    clock.destroy_for_testing();
-    ts::end(scenario);
-}
-
-#[test]
-fun test_contributor_update_task_status() {
-    let mut scenario = setup_test();
-    let clock = create_test_clock(&mut scenario);
-    
-    // Create board
-    ts::next_tx(&mut scenario, ADMIN);
-    {
-        let admin_cap = create_admin_cap_for_testing(ts::ctx(&mut scenario));
-        create_board(&admin_cap, string::utf8(b"Project Board"), string::utf8(b""), default_statuses(), &clock, ts::ctx(&mut scenario));
-        transfer::public_transfer(admin_cap, ADMIN);
-    };
-    
-    // Add contributor
+    // Update status through workflow
     ts::next_tx(&mut scenario, ADMIN);
     {
         let board = ts::take_shared<Board>(&scenario);
-        let admin_cap = ts::take_from_sender<AdminCap>(&scenario);
+        let mut task = ts::take_shared<Task>(&scenario);
+        let contributor_cap = create_contributor_cap_for_testing(&board, ts::ctx(&mut scenario));
         
-        add_contributor(&admin_cap, &board, CONTRIBUTOR1, ts::ctx(&mut scenario));
+        let (_, _, _, status, _, _, _, _, _) = get_task_info(&task);
+        assert!(status == string::utf8(b"To-Do"));
         
-        ts::return_to_sender(&scenario, admin_cap);
-        ts::return_shared(board);
-    };
-    
-    // Contributor creates task
-    ts::next_tx(&mut scenario, CONTRIBUTOR1);
-    {
-        let mut board = ts::take_shared<Board>(&scenario);
-        let contributor_cap = ts::take_from_sender<ContributorCap>(&scenario);
+        // Update to In-Progress
+        update_task_status(&contributor_cap, &board, &mut task, string::utf8(b"In-Progress"), &clock, ts::ctx(&mut scenario));
+        let (_, _, _, new_status, _, _, _, _, _) = get_task_info(&task);
+        assert!(new_status == string::utf8(b"In-Progress"));
         
-        create_task(
-            &contributor_cap,
-            &mut board,
-            string::utf8(b"Task"),
-            string::utf8(b"Description"),
-            0,
-            1,
-            vector[],
-            &clock,
-            ts::ctx(&mut scenario)
-        );
+        // Update to Done
+        update_task_status(&contributor_cap, &board, &mut task, string::utf8(b"Done"), &clock, ts::ctx(&mut scenario));
+        let (_, _, _, final_status, _, _, _, _, _) = get_task_info(&task);
+        assert!(final_status == string::utf8(b"Done"));
         
-        ts::return_to_sender(&scenario, contributor_cap);
-        ts::return_shared(board);
-    };
-    
-    // Contributor updates task status
-    ts::next_tx(&mut scenario, CONTRIBUTOR1);
-    {
-        let mut board = ts::take_shared<Board>(&scenario);
-        let contributor_cap = ts::take_from_sender<ContributorCap>(&scenario);
-        
-        update_task_status(&contributor_cap, &mut board, 0, string::utf8(b"In-Progress"), &clock, ts::ctx(&mut scenario));
-        
-        let (_, _, _, status, _, _, _, _, _) = get_task_info(&board, 0);
-        assert!(status == string::utf8(b"In-Progress"));
-        
-        ts::return_to_sender(&scenario, contributor_cap);
+        burn_contributor_cap(contributor_cap);
+        ts::return_shared(task);
         ts::return_shared(board);
     };
     
@@ -662,19 +649,31 @@ fun test_assign_task() {
             ts::ctx(&mut scenario)
         );
         
+        burn_contributor_cap(contributor_cap);
+        ts::return_shared(board);
+    };
+    
+    // Assign task
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let board = ts::take_shared<Board>(&scenario);
+        let mut task = ts::take_shared<Task>(&scenario);
+        let contributor_cap = create_contributor_cap_for_testing(&board, ts::ctx(&mut scenario));
+        
         assign_task(
             &contributor_cap,
-            &mut board,
-            0,
+            &board,
+            &mut task,
             vector[CONTRIBUTOR1, CONTRIBUTOR2],
             &clock,
             ts::ctx(&mut scenario)
         );
         
-        let (_, _, _, _, _, assignees, _, _, _) = get_task_info(&board, 0);
+        let (_, _, _, _, _, assignees, _, _, _) = get_task_info(&task);
         assert!(assignees == vector[CONTRIBUTOR1, CONTRIBUTOR2]);
         
         burn_contributor_cap(contributor_cap);
+        ts::return_shared(task);
         ts::return_shared(board);
     };
     
@@ -701,85 +700,13 @@ fun test_create_multiple_tasks() {
         let mut board = ts::take_shared<Board>(&scenario);
         let contributor_cap = create_contributor_cap_for_testing(&board, ts::ctx(&mut scenario));
         
-        let task1_id = create_task(
-            &contributor_cap,
-            &mut board,
-            string::utf8(b"Task 1"),
-            string::utf8(b"First task"),
-            0,
-            1,
-            vector[],
-            &clock,
-            ts::ctx(&mut scenario)
-        );
+        create_task(&contributor_cap, &mut board, string::utf8(b"Task 1"), string::utf8(b"First task"), 0, 1, vector[], &clock, ts::ctx(&mut scenario));
+        create_task(&contributor_cap, &mut board, string::utf8(b"Task 2"), string::utf8(b"Second task"), 0, 2, vector[], &clock, ts::ctx(&mut scenario));
+        create_task(&contributor_cap, &mut board, string::utf8(b"Task 3"), string::utf8(b"Third task"), 0, 3, vector[], &clock, ts::ctx(&mut scenario));
         
-        let task2_id = create_task(
-            &contributor_cap,
-            &mut board,
-            string::utf8(b"Task 2"),
-            string::utf8(b"Second task"),
-            0,
-            2,
-            vector[],
-            &clock,
-            ts::ctx(&mut scenario)
-        );
-        
-        let task3_id = create_task(
-            &contributor_cap,
-            &mut board,
-            string::utf8(b"Task 3"),
-            string::utf8(b"Third task"),
-            0,
-            3,
-            vector[],
-            &clock,
-            ts::ctx(&mut scenario)
-        );
-        
-        assert!(task1_id == 0);
-        assert!(task2_id == 1);
-        assert!(task3_id == 2);
         assert!(get_task_count(&board) == 3);
-        
-        burn_contributor_cap(contributor_cap);
-        ts::return_shared(board);
-    };
-    
-    clock.destroy_for_testing();
-    ts::end(scenario);
-}
-
-#[test, expected_failure(abort_code = moveit::ETaskNotFound)]
-fun test_update_nonexistent_task_fails() {
-    let mut scenario = setup_test();
-    let clock = create_test_clock(&mut scenario);
-    
-    // Create board
-    ts::next_tx(&mut scenario, ADMIN);
-    {
-        let admin_cap = create_admin_cap_for_testing(ts::ctx(&mut scenario));
-        create_board(&admin_cap, string::utf8(b"Project Board"), string::utf8(b""), default_statuses(), &clock, ts::ctx(&mut scenario));
-        transfer::public_transfer(admin_cap, ADMIN);
-    };
-    
-    // Try to update non-existent task
-    ts::next_tx(&mut scenario, ADMIN);
-    {
-        let mut board = ts::take_shared<Board>(&scenario);
-        let contributor_cap = create_contributor_cap_for_testing(&board, ts::ctx(&mut scenario));
-        
-        update_task(
-            &contributor_cap,
-            &mut board,
-            999, // Non-existent task
-            string::utf8(b"Title"),
-            string::utf8(b"Description"),
-            0,
-            1,
-            &clock,
-            ts::ctx(&mut scenario)
-        );
+        let task_ids = get_board_task_ids(&board);
+        assert!(task_ids.length() == 3);
         
         burn_contributor_cap(contributor_cap);
         ts::return_shared(board);
@@ -802,28 +729,30 @@ fun test_invalid_status_fails() {
         transfer::public_transfer(admin_cap, ADMIN);
     };
     
-    // Create task and try invalid status
+    // Create task
     ts::next_tx(&mut scenario, ADMIN);
     {
         let mut board = ts::take_shared<Board>(&scenario);
         let contributor_cap = create_contributor_cap_for_testing(&board, ts::ctx(&mut scenario));
         
-        create_task(
-            &contributor_cap,
-            &mut board,
-            string::utf8(b"Task"),
-            string::utf8(b"Description"),
-            0,
-            1,
-            vector[],
-            &clock,
-            ts::ctx(&mut scenario)
-        );
-        
-        // "Invalid-Status" is not in the board's workflow
-        update_task_status(&contributor_cap, &mut board, 0, string::utf8(b"Invalid-Status"), &clock, ts::ctx(&mut scenario));
+        create_task(&contributor_cap, &mut board, string::utf8(b"Task"), string::utf8(b"Description"), 0, 1, vector[], &clock, ts::ctx(&mut scenario));
         
         burn_contributor_cap(contributor_cap);
+        ts::return_shared(board);
+    };
+    
+    // Try invalid status
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let board = ts::take_shared<Board>(&scenario);
+        let mut task = ts::take_shared<Task>(&scenario);
+        let contributor_cap = create_contributor_cap_for_testing(&board, ts::ctx(&mut scenario));
+        
+        // "Invalid-Status" is not in the board's workflow
+        update_task_status(&contributor_cap, &board, &mut task, string::utf8(b"Invalid-Status"), &clock, ts::ctx(&mut scenario));
+        
+        burn_contributor_cap(contributor_cap);
+        ts::return_shared(task);
         ts::return_shared(board);
     };
     
@@ -991,13 +920,13 @@ fun test_create_subtask() {
         transfer::public_transfer(admin_cap, ADMIN);
     };
     
-    // Create parent task and subtask
+    // Create parent task
     ts::next_tx(&mut scenario, ADMIN);
     {
         let mut board = ts::take_shared<Board>(&scenario);
         let contributor_cap = create_contributor_cap_for_testing(&board, ts::ctx(&mut scenario));
         
-        let parent_id = create_task(
+        create_task(
             &contributor_cap,
             &mut board,
             string::utf8(b"Parent Task"),
@@ -1009,14 +938,24 @@ fun test_create_subtask() {
             ts::ctx(&mut scenario)
         );
         
-        assert!(parent_id == 0);
-        assert!(!is_subtask(&board, parent_id));
-        assert!(!has_subtasks(&board, parent_id));
+        burn_contributor_cap(contributor_cap);
+        ts::return_shared(board);
+    };
+    
+    // Create subtask
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let mut board = ts::take_shared<Board>(&scenario);
+        let mut parent_task = ts::take_shared<Task>(&scenario);
+        let contributor_cap = create_contributor_cap_for_testing(&board, ts::ctx(&mut scenario));
+        
+        assert!(!is_subtask(&parent_task));
+        assert!(!has_subtasks(&parent_task));
         
         let subtask_id = create_subtask(
             &contributor_cap,
             &mut board,
-            0, // parent_task_id
+            &mut parent_task,
             string::utf8(b"Subtask 1"),
             string::utf8(b"First subtask"),
             0,
@@ -1026,21 +965,32 @@ fun test_create_subtask() {
             ts::ctx(&mut scenario)
         );
         
-        assert!(subtask_id == 1);
-        assert!(is_subtask(&board, subtask_id));
-        assert!(has_subtasks(&board, 0));
-        assert!(get_subtask_count(&board, 0) == 1);
+        assert!(has_subtasks(&parent_task));
+        assert!(get_subtask_count(&parent_task) == 1);
         
-        let subtask_ids = get_subtask_ids(&board, 0);
+        let subtask_ids = get_subtask_ids(&parent_task);
         assert!(subtask_ids.length() == 1);
-        assert!(*subtask_ids.borrow(0) == 1);
-        
-        let parent_id_opt = get_parent_task_id(&board, subtask_id);
-        assert!(option::is_some(&parent_id_opt));
-        assert!(*option::borrow(&parent_id_opt) == 0);
+        assert!(*subtask_ids.borrow(0) == subtask_id);
         
         burn_contributor_cap(contributor_cap);
+        ts::return_shared(parent_task);
         ts::return_shared(board);
+    };
+    
+    // Verify subtask
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        // Take subtask (second shared Task object)
+        let parent_task = ts::take_shared<Task>(&scenario);
+        let subtask = ts::take_shared<Task>(&scenario);
+        
+        assert!(is_subtask(&subtask));
+        let parent_id_opt = get_parent_task_id(&subtask);
+        assert!(option::is_some(&parent_id_opt));
+        assert!(*option::borrow(&parent_id_opt) == object::id(&parent_task));
+        
+        ts::return_shared(subtask);
+        ts::return_shared(parent_task);
     };
     
     clock.destroy_for_testing();
@@ -1060,29 +1010,34 @@ fun test_multiple_subtasks() {
         transfer::public_transfer(admin_cap, ADMIN);
     };
     
-    // Create parent task and multiple subtasks
+    // Create parent task
     ts::next_tx(&mut scenario, ADMIN);
     {
         let mut board = ts::take_shared<Board>(&scenario);
         let contributor_cap = create_contributor_cap_for_testing(&board, ts::ctx(&mut scenario));
         
-        // Create parent
         create_task(&contributor_cap, &mut board, string::utf8(b"Epic"), string::utf8(b""), 0, 20, vector[], &clock, ts::ctx(&mut scenario));
         
-        // Create 3 subtasks
-        create_subtask(&contributor_cap, &mut board, 0, string::utf8(b"Subtask 1"), string::utf8(b""), 0, 5, vector[], &clock, ts::ctx(&mut scenario));
-        create_subtask(&contributor_cap, &mut board, 0, string::utf8(b"Subtask 2"), string::utf8(b""), 0, 5, vector[], &clock, ts::ctx(&mut scenario));
-        create_subtask(&contributor_cap, &mut board, 0, string::utf8(b"Subtask 3"), string::utf8(b""), 0, 5, vector[], &clock, ts::ctx(&mut scenario));
+        burn_contributor_cap(contributor_cap);
+        ts::return_shared(board);
+    };
+    
+    // Create 3 subtasks
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let mut board = ts::take_shared<Board>(&scenario);
+        let mut parent_task = ts::take_shared<Task>(&scenario);
+        let contributor_cap = create_contributor_cap_for_testing(&board, ts::ctx(&mut scenario));
         
-        assert!(get_subtask_count(&board, 0) == 3);
+        create_subtask(&contributor_cap, &mut board, &mut parent_task, string::utf8(b"Subtask 1"), string::utf8(b""), 0, 5, vector[], &clock, ts::ctx(&mut scenario));
+        create_subtask(&contributor_cap, &mut board, &mut parent_task, string::utf8(b"Subtask 2"), string::utf8(b""), 0, 5, vector[], &clock, ts::ctx(&mut scenario));
+        create_subtask(&contributor_cap, &mut board, &mut parent_task, string::utf8(b"Subtask 3"), string::utf8(b""), 0, 5, vector[], &clock, ts::ctx(&mut scenario));
+        
+        assert!(get_subtask_count(&parent_task) == 3);
         assert!(get_task_count(&board) == 4); // 1 parent + 3 subtasks
         
-        let subtask_ids = get_subtask_ids(&board, 0);
-        assert!(*subtask_ids.borrow(0) == 1);
-        assert!(*subtask_ids.borrow(1) == 2);
-        assert!(*subtask_ids.borrow(2) == 3);
-        
         burn_contributor_cap(contributor_cap);
+        ts::return_shared(parent_task);
         ts::return_shared(board);
     };
     
@@ -1103,48 +1058,46 @@ fun test_cannot_nest_subtasks() {
         transfer::public_transfer(admin_cap, ADMIN);
     };
     
-    // Create parent, subtask, and try to nest - should fail
+    // Create parent task
     ts::next_tx(&mut scenario, ADMIN);
     {
         let mut board = ts::take_shared<Board>(&scenario);
         let contributor_cap = create_contributor_cap_for_testing(&board, ts::ctx(&mut scenario));
         
         create_task(&contributor_cap, &mut board, string::utf8(b"Parent"), string::utf8(b""), 0, 10, vector[], &clock, ts::ctx(&mut scenario));
-        create_subtask(&contributor_cap, &mut board, 0, string::utf8(b"Subtask"), string::utf8(b""), 0, 5, vector[], &clock, ts::ctx(&mut scenario));
-        
-        // Subtask 1 has ID 1, try to make it a parent - should fail
-        create_subtask(&contributor_cap, &mut board, 1, string::utf8(b"Nested"), string::utf8(b""), 0, 2, vector[], &clock, ts::ctx(&mut scenario));
         
         burn_contributor_cap(contributor_cap);
         ts::return_shared(board);
     };
     
-    clock.destroy_for_testing();
-    ts::end(scenario);
-}
-
-#[test, expected_failure(abort_code = moveit::EParentTaskNotFound)]
-fun test_subtask_invalid_parent() {
-    let mut scenario = setup_test();
-    let clock = create_test_clock(&mut scenario);
-    
-    // Create board
-    ts::next_tx(&mut scenario, ADMIN);
-    {
-        let admin_cap = create_admin_cap_for_testing(ts::ctx(&mut scenario));
-        create_board(&admin_cap, string::utf8(b"Board"), string::utf8(b""), default_statuses(), &clock, ts::ctx(&mut scenario));
-        transfer::public_transfer(admin_cap, ADMIN);
-    };
-    
-    // Try to create subtask with non-existent parent
+    // Create subtask
     ts::next_tx(&mut scenario, ADMIN);
     {
         let mut board = ts::take_shared<Board>(&scenario);
+        let mut parent_task = ts::take_shared<Task>(&scenario);
         let contributor_cap = create_contributor_cap_for_testing(&board, ts::ctx(&mut scenario));
         
-        create_subtask(&contributor_cap, &mut board, 999, string::utf8(b"Orphan"), string::utf8(b""), 0, 5, vector[], &clock, ts::ctx(&mut scenario));
+        create_subtask(&contributor_cap, &mut board, &mut parent_task, string::utf8(b"Subtask"), string::utf8(b""), 0, 5, vector[], &clock, ts::ctx(&mut scenario));
         
         burn_contributor_cap(contributor_cap);
+        ts::return_shared(parent_task);
+        ts::return_shared(board);
+    };
+    
+    // Try to create subtask of subtask - should fail
+    ts::next_tx(&mut scenario, ADMIN);
+    {
+        let mut board = ts::take_shared<Board>(&scenario);
+        let _parent_task = ts::take_shared<Task>(&scenario);
+        let mut subtask = ts::take_shared<Task>(&scenario);
+        let contributor_cap = create_contributor_cap_for_testing(&board, ts::ctx(&mut scenario));
+        
+        // Try to make subtask a parent - should fail
+        create_subtask(&contributor_cap, &mut board, &mut subtask, string::utf8(b"Nested"), string::utf8(b""), 0, 2, vector[], &clock, ts::ctx(&mut scenario));
+        
+        burn_contributor_cap(contributor_cap);
+        ts::return_shared(subtask);
+        ts::return_shared(_parent_task);
         ts::return_shared(board);
     };
     
