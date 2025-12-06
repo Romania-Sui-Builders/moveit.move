@@ -1,0 +1,9 @@
+[phases.build]
+cmds = ["npm ci", "npx prisma generate", "npx tsc"]
+
+[phases.setup]
+nixPkgs = ["nodejs_18"]
+
+[start]
+cmd = "npx prisma migrate deploy && node dist/main.js"
+
