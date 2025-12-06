@@ -48,10 +48,10 @@ export function LandingPage() {
                 }
                 className="sui-connect-button text-lg px-8 h-12"
               />
-              <Button size="lg" variant="outline" className="gap-2 text-lg px-8 bg-transparent">
+              {/* <Button size="lg" variant="outline" className="gap-2 text-lg px-8 bg-transparent">
                 <BookOpen className="h-5 w-5" />
                 View Documentation
-              </Button>
+              </Button> */}
             </div>
           </div>
         </section>
@@ -186,11 +186,11 @@ export function LandingPage() {
             <p className="text-lg text-muted-foreground text-pretty">
               Connect your Sui wallet and start managing tasks on the blockchain in seconds. No credit card required.
             </p>
-            <Button size="lg" className="gap-2 text-lg px-8">
+            {/* <Button size="lg" className="gap-2 text-lg px-8">
               <Shield className="h-5 w-5" />
               Get Started Now
               <ArrowRight className="h-5 w-5" />
-            </Button>
+            </Button> */}
           </div>
         </section>
 
