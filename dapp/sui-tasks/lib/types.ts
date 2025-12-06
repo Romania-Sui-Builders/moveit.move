@@ -3,11 +3,15 @@ export interface Board {
   id: string
   name: string
   description: string
-  owner: string
-  members: string[]
-  taskIds: string[]
+  owner?: string
+  members?: string[] // ⚠️ NOT in contract - kept for backward compatibility with mock data
+  taskIds?: string[]
   createdAt: number
-  columns: BoardColumn[]
+  columns?: BoardColumn[] // ⚠️ UI representation of statuses
+  // MoveIt contract fields (actual blockchain data)
+  statuses?: string[] // ✅ Contract uses this - workflow statuses
+  taskCounter?: number // ✅ Contract uses this
+  version?: number // ✅ Contract uses this
 }
 
 export interface BoardColumn {
@@ -18,17 +22,25 @@ export interface BoardColumn {
 }
 
 export interface Task {
-  id: string
+  id: string // ✅ Task Object ID (from blockchain)
   boardId: string
+  taskNumber?: number // ✅ Sequential number within board (for display like #123)
   title: string
   description: string
   status: string
-  assignee: string | null
+  assignee: string | null // Legacy field for compatibility
+  assignees?: string[] // ✅ Multiple assignees (from contract)
+  dueDate?: number // ✅ Unix timestamp in milliseconds
+  effort?: number // ✅ Effort estimation (story points or hours)
   creator: string
   createdAt: number
   updatedAt: number
+  parentTaskId?: string // ✅ Parent task Object ID (for subtasks)
+  subtaskIds?: string[] // ✅ Subtask Object IDs
+  commentCount?: number // ✅ Number of comments
+  // Legacy fields for backward compatibility
   storyPoints?: number
-  priority: "low" | "medium" | "high" | "urgent"
+  priority?: "low" | "medium" | "high" | "urgent"
 }
 
 export interface Member {

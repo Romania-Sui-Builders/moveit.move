@@ -9,8 +9,11 @@ import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
-import { X, Pencil, Save, Trash2, Calendar } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { X, Pencil, Save, Trash2, Calendar, AlertCircle } from "lucide-react"
 import type { Task, Board } from "@/lib/types"
+import { useContributorCapForBoard } from "@/hooks/useContributorCaps"
+import { useUpdateTask } from "@/hooks/useTasks"
 
 interface TaskDetailProps {
   task: Task
@@ -25,44 +28,102 @@ export function TaskDetail({ task: initialTask, board, onClose }: TaskDetailProp
   const [description, setDescription] = useState(task.description)
   const [status, setStatus] = useState(task.status)
   const [assignee, setAssignee] = useState(task.assignee || "")
-  const [storyPoints, setStoryPoints] = useState<number | "">(task.storyPoints || "")
+  const [storyPoints, setStoryPoints] = useState<number | "">(task.effort || "")
   const [priority, setPriority] = useState(task.priority)
+  const [dueDate, setDueDate] = useState(
+    task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : ""
+  )
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  
+  // ✅ Query ContributorCap for this board
+  const { data: contributorCapId, isLoading: isLoadingCap } = useContributorCapForBoard(board.id)
+  
+  // ✅ Use blockchain update hook
+  const { mutateAsync: updateTask } = useUpdateTask()
 
-  const currentColumn = board.columns.find((col) => col.id === task.status)
+  const currentColumn = board.columns?.find((col) => col.id === task.status)
 
   const getPriorityVariant = (p: Task["priority"]) => {
-    const variants = {
+    const variants: Record<NonNullable<Task["priority"]>, "default" | "secondary" | "destructive" | "outline"> = {
       urgent: "destructive",
       high: "default",
       medium: "secondary",
       low: "outline",
     }
-    return variants[p] as "default" | "secondary" | "destructive" | "outline"
+    return p ? variants[p] ?? "default" : "default"
   }
 
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault()
+    
+    if (!contributorCapId) {
+      alert("ContributorCap required to update tasks")
+      return
+    }
+    
     setIsSubmitting(true)
 
-    await new Promise((resolve) => setTimeout(resolve, 1000))
+    try {
+      // Convert due date to timestamp
+      const dueDateTimestamp = dueDate ? new Date(dueDate).getTime() : 0
+      
+      console.log("🔄 Attempting to update task:", {
+        taskObjectId: task.id,
+        boardId: board.id,
+        contributorCapId,
+        updates: {
+          title,
+          description,
+          dueDate: dueDateTimestamp,
+          effortHours: typeof storyPoints === 'number' ? storyPoints : 0,
+        },
+      })
+      
+      // Update task on blockchain
+      await updateTask({
+        taskObjectId: task.id,
+        boardId: board.id,
+        contributorCapId,
+        updates: {
+          title,
+          description,
+          dueDate: dueDateTimestamp,
+          effortHours: typeof storyPoints === 'number' ? storyPoints : 0,
+        },
+      })
 
-    const updatedTask = {
-      ...task,
-      title,
-      description,
-      status,
-      assignee: assignee || null,
-      storyPoints: storyPoints || undefined,
-      priority,
-      updatedAt: Date.now(),
+      // Update local state
+      const updatedTask = {
+        ...task,
+        title,
+        description,
+        dueDate: dueDateTimestamp,
+        effort: typeof storyPoints === 'number' ? storyPoints : 0,
+        updatedAt: Date.now(),
+      }
+
+      console.log("✅ Task updated on blockchain:", updatedTask)
+      setTask(updatedTask)
+      setIsEditing(false)
+      alert("Task updated successfully!")
+    } catch (error) {
+      console.error("❌ Failed to update task:", error)
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      
+      // Check if it's the Table structure issue
+      if (errorMessage.includes("Table") || errorMessage.includes("dynamic_field")) {
+        alert(
+          "⚠️ Update Failed: This board uses the old Table structure.\n\n" +
+          "Task updates are not yet supported for boards with Table storage.\n\n" +
+          "Please create a new board to use the latest task management features."
+        )
+      } else {
+        alert(`Failed to update task: ${errorMessage}`)
+      }
+    } finally {
+      setIsSubmitting(false)
     }
-
-    console.log("[v0] Updating task:", updatedTask)
-    setTask(updatedTask)
-    setIsSubmitting(false)
-    setIsEditing(false)
   }
 
   const handleDelete = async () => {
@@ -89,6 +150,16 @@ export function TaskDetail({ task: initialTask, board, onClose }: TaskDetailProp
   return (
     <Card className="max-w-3xl">
       <CardHeader>
+        {/* ✅ Warning when ContributorCap not available */}
+        {!isLoadingCap && !contributorCapId && (
+          <Alert variant="destructive" className="mb-4">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              You need contributor access to edit this task. Ask the board admin to add you as a contributor.
+            </AlertDescription>
+          </Alert>
+        )}
+        
         <div className="flex items-center justify-between">
           <div className="flex-1">
             {isEditing ? (
@@ -105,7 +176,7 @@ export function TaskDetail({ task: initialTask, board, onClose }: TaskDetailProp
               <Badge className="text-white" style={{ backgroundColor: currentColumn?.color || "#64748b" }}>
                 {currentColumn?.name || task.status}
               </Badge>
-              <Badge variant={getPriorityVariant(task.priority)}>{task.priority.toUpperCase()}</Badge>
+              <Badge variant={getPriorityVariant(task.priority)}>{(task.priority || 'low').toUpperCase()}</Badge>
               {task.storyPoints && (
                 <Badge variant="outline">
                   {task.storyPoints} Story Point{task.storyPoints !== 1 ? "s" : ""}
@@ -119,10 +190,20 @@ export function TaskDetail({ task: initialTask, board, onClose }: TaskDetailProp
           <div className="flex items-center gap-2">
             {!isEditing && (
               <>
-                <Button variant="outline" size="icon" onClick={() => setIsEditing(true)}>
+                <Button 
+                  variant="outline" 
+                  size="icon" 
+                  onClick={() => setIsEditing(true)}
+                  disabled={!contributorCapId}
+                >
                   <Pencil className="h-4 w-4" />
                 </Button>
-                <Button variant="destructive" size="icon" onClick={handleDelete} disabled={isDeleting}>
+                <Button 
+                  variant="destructive" 
+                  size="icon" 
+                  onClick={handleDelete} 
+                  disabled={isDeleting || !contributorCapId}
+                >
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </>
@@ -159,7 +240,7 @@ export function TaskDetail({ task: initialTask, board, onClose }: TaskDetailProp
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {board.columns
+                    {(board.columns || [])
                       .sort((a, b) => a.order - b.order)
                       .map((column) => (
                         <SelectItem key={column.id} value={column.id}>
@@ -180,7 +261,7 @@ export function TaskDetail({ task: initialTask, board, onClose }: TaskDetailProp
             <div className="space-y-2">
               <Label htmlFor="task-priority">Priority</Label>
               {isEditing ? (
-                <Select value={priority} onValueChange={(value: typeof priority) => setPriority(value)}>
+                <Select value={priority} onValueChange={(value) => setPriority(value as typeof priority)}>
                   <SelectTrigger id="task-priority">
                     <SelectValue />
                   </SelectTrigger>
@@ -193,7 +274,7 @@ export function TaskDetail({ task: initialTask, board, onClose }: TaskDetailProp
                 </Select>
               ) : (
                 <div className="h-10 flex items-center">
-                  <Badge variant={getPriorityVariant(task.priority)}>{task.priority.toUpperCase()}</Badge>
+                  <Badge variant={getPriorityVariant(task.priority)}>{(task.priority || 'low').toUpperCase()}</Badge>
                 </div>
               )}
             </div>
@@ -216,7 +297,7 @@ export function TaskDetail({ task: initialTask, board, onClose }: TaskDetailProp
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="task-story-points">Story Points</Label>
+              <Label htmlFor="task-story-points">Effort (Story Points/Hours)</Label>
               {isEditing ? (
                 <Input
                   id="task-story-points"
@@ -228,7 +309,23 @@ export function TaskDetail({ task: initialTask, board, onClose }: TaskDetailProp
                 />
               ) : (
                 <div className="h-10 flex items-center text-sm">
-                  {task.storyPoints || <span className="text-muted-foreground">Not set</span>}
+                  {task.effort || <span className="text-muted-foreground">Not set</span>}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="task-due-date">Due Date</Label>
+              {isEditing ? (
+                <Input
+                  id="task-due-date"
+                  type="date"
+                  value={dueDate}
+                  onChange={(e) => setDueDate(e.target.value)}
+                />
+              ) : (
+                <div className="h-10 flex items-center text-sm">
+                  {task.dueDate ? new Date(task.dueDate).toLocaleDateString() : <span className="text-muted-foreground">Not set</span>}
                 </div>
               )}
             </div>

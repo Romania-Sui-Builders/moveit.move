@@ -64,14 +64,14 @@ export function Sidebar({
 
       <div className="border-t border-border my-2" />
 
-      <div className="px-4 py-2 flex items-center justify-between">
+      {/* <div className="px-4 py-2 flex items-center justify-between">
         <span className="text-sm font-medium text-muted-foreground">Your Boards</span>
         <Button variant="ghost" size="icon" className="h-6 w-6">
           <Plus className="h-4 w-4" />
         </Button>
-      </div>
+      </div> */}
 
-      <div className="flex-1 overflow-auto px-2 pb-4">
+      {/* <div className="flex-1 overflow-auto px-2 pb-4">
         {boards.map((board) => (
           <Button
             key={board.id}
@@ -88,7 +88,7 @@ export function Sidebar({
             <span className="truncate">{board.name}</span>
           </Button>
         ))}
-      </div>
+      </div> */}
     </aside>
   )
 }

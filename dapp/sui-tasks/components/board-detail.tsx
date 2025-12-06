@@ -4,30 +4,57 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ArrowLeft, Settings, Trash2 } from "lucide-react"
-import { mockBoards, mockTasks } from "@/lib/mock-data"
 import { TaskList } from "./task-list"
 import { MemberList } from "./member-list"
 import { BoardSettings } from "./board-settings"
+import { AddContributorForm } from "./add-contributor-form"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import useSWR from "swr"
+
+// ✅ Get AdminCap ID from environment
+const ADMIN_CAP_ID = process.env.NEXT_PUBLIC_ADMIN_CAP_ID
 
 interface BoardDetailProps {
   boardId: string
 }
 
+const fetcher = async (url: string) => {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error('Failed to fetch');
+  const data = await response.json();
+  return data;
+};
+
 export function BoardDetail({ boardId }: BoardDetailProps) {
   const router = useRouter()
-  const [board, setBoard] = useState(mockBoards.find((b) => b.id === boardId))
   const [showSettings, setShowSettings] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
 
-  const { data: tasks = [] } = useSWR(`/api/tasks?boardId=${boardId}`, {
-    fallbackData: mockTasks.filter((task) => task.boardId === boardId),
-    refreshInterval: 3000,
-  })
+  const { data: boardData, error: boardError, isLoading: boardLoading } = useSWR(
+    `/api/boards/${boardId}`,
+    fetcher,
+    { refreshInterval: 5000 }
+  )
 
-  if (!board) {
+  const { data: tasksData, error: tasksError } = useSWR(
+    `/api/boards/${boardId}/tasks`,
+    fetcher,
+    { refreshInterval: 3000 }
+  )
+
+  const board = boardData?.board
+  const tasks = tasksData?.tasks || []
+
+  if (boardLoading) {
+    return (
+      <div className="text-center py-12">
+        <p className="text-muted-foreground">Loading board...</p>
+      </div>
+    )
+  }
+
+  if (boardError || !board) {
     return (
       <div className="text-center py-12">
         <h2 className="text-2xl font-bold mb-2">Board not found</h2>
@@ -53,8 +80,9 @@ export function BoardDetail({ boardId }: BoardDetailProps) {
     router.push("/")
   }
 
-  const handleUpdate = (updatedBoard: typeof board) => {
-    setBoard(updatedBoard)
+  const handleUpdate = () => {
+    // Board updates happen via blockchain transaction
+    // This will trigger a re-fetch via SWR
     setShowSettings(false)
   }
 
@@ -84,15 +112,32 @@ export function BoardDetail({ boardId }: BoardDetailProps) {
         </div>
       </div>
 
-      {showSettings && <BoardSettings board={board} onUpdate={handleUpdate} onClose={() => setShowSettings(false)} />}
+      {showSettings && (
+        <BoardSettings 
+          board={board} 
+          onUpdate={handleUpdate} 
+          onClose={() => setShowSettings(false)} 
+          adminCapId={ADMIN_CAP_ID} 
+        />
+      )}
 
       <Tabs defaultValue="tasks" className="w-full">
         <TabsList>
           <TabsTrigger value="tasks">Tasks</TabsTrigger>
-          <TabsTrigger value="members">Members</TabsTrigger>
+          <TabsTrigger value="contributors">Contributors</TabsTrigger>
+          {/* <TabsTrigger value="members">Members</TabsTrigger> */}
         </TabsList>
         <TabsContent value="tasks" className="mt-6">
           <TaskList boardId={boardId} tasks={tasks} board={board} />
+        </TabsContent>
+        <TabsContent value="contributors" className="mt-6">
+          {ADMIN_CAP_ID ? (
+            <AddContributorForm boardId={boardId} adminCapId={ADMIN_CAP_ID} />
+          ) : (
+            <div className="text-center text-muted-foreground py-8">
+              Admin capability required to add contributors
+            </div>
+          )}
         </TabsContent>
         <TabsContent value="members" className="mt-6">
           <MemberList board={board} />

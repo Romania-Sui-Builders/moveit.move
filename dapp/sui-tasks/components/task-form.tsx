@@ -1,3 +1,25 @@
+/**
+ * Task Creation Form
+ * 
+ * ✅ BLOCKCHAIN INTEGRATION:
+ * Uses create_task() contract function with ContributorCap
+ * 
+ * CONTRACT FIELDS SUPPORTED:
+ * - title: String ✅
+ * - description: String ✅
+ * - due_date: u64 (timestamp in ms) ✅
+ * - effort: u64 (story points or hours) ✅
+ * - assignees: vector<address> ✅
+ * 
+ * ⚠️ CONTRACT LIMITATIONS:
+ * - Status is ALWAYS set to first status in board workflow (cannot choose)
+ * - Priority field not in contract (UI-only, removed)
+ * 
+ * 🔄 WORKFLOW:
+ * 1. User fills form
+ * 2. Submit creates task with first status automatically
+ * 3. To change status: use task detail view after creation
+ */
 "use client"
 
 import type React from "react"
@@ -7,9 +29,12 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { X } from "lucide-react"
+import { X, AlertCircle } from "lucide-react"
 import type { Board } from "@/lib/types"
+import { useCreateTask } from "@/hooks/useTasks"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { useCurrentAccount } from "@mysten/dapp-kit"
+import { useContributorCapForBoard } from "@/hooks/useContributorCaps"
 
 interface TaskFormProps {
   boardId: string
@@ -18,31 +43,57 @@ interface TaskFormProps {
 }
 
 export function TaskForm({ boardId, board, onClose }: TaskFormProps) {
+  const account = useCurrentAccount()
+  const createTask = useCreateTask(boardId)
+  
+  // ✅ Query ContributorCap for this board
+  const { data: contributorCapId, isLoading: isLoadingCap } = useContributorCapForBoard(boardId)
+  
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
-  const [status, setStatus] = useState(board.columns[0]?.id || "todo")
+  const [dueDate, setDueDate] = useState("")
+  const [effort, setEffort] = useState<number | "">("")
   const [assignee, setAssignee] = useState("")
-  const [storyPoints, setStoryPoints] = useState<number | "">("")
-  const [priority, setPriority] = useState<"low" | "medium" | "high" | "urgent">("medium")
   const [isSubmitting, setIsSubmitting] = useState(false)
+  
+  // ✅ Get initial status from contract's statuses array
+  const statuses = board.statuses || []
+  const initialStatus = statuses.length > 0 ? statuses[0] : "To-Do"
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    
+    if (!contributorCapId) {
+      alert("ContributorCap required to create tasks")
+      return
+    }
+    
+    if (!account) {
+      alert("Please connect your wallet")
+      return
+    }
+    
     setIsSubmitting(true)
 
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-
-    console.log("[v0] Creating task:", {
-      boardId,
-      title,
-      description,
-      status,
-      assignee: assignee || null,
-      storyPoints: storyPoints || undefined,
-      priority,
-    })
-    setIsSubmitting(false)
-    onClose()
+    try {
+      // Convert due date to timestamp (milliseconds)
+      const dueDateTimestamp = dueDate ? new Date(dueDate).getTime() : 0
+      
+      await createTask.mutateAsync({
+        contributorCapId,
+        title,
+        description,
+        assignee: assignee || account.address,
+        dueDate: dueDateTimestamp,
+        effortHours: typeof effort === 'number' ? effort : 0,
+      })
+      
+      onClose()
+    } catch (error) {
+      console.error("Failed to create task:", error)
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -59,6 +110,26 @@ export function TaskForm({ boardId, board, onClose }: TaskFormProps) {
         </div>
       </CardHeader>
       <CardContent>
+        {/* ✅ Loading state while checking for ContributorCap */}
+        {isLoadingCap && (
+          <Alert className="mb-4">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              Checking contributor access...
+            </AlertDescription>
+          </Alert>
+        )}
+        
+        {/* ✅ Warning when ContributorCap not available */}
+        {!isLoadingCap && !contributorCapId && (
+          <Alert variant="destructive" className="mb-4">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              You need contributor access to create tasks on this board. Ask the board admin to add you as a contributor.
+            </AlertDescription>
+          </Alert>
+        )}
+        
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="title">Task Title</Label>
@@ -84,51 +155,44 @@ export function TaskForm({ boardId, board, onClose }: TaskFormProps) {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* ⚠️ Status selector removed - contract creates tasks with first status automatically */}
             <div className="space-y-2">
-              <Label htmlFor="status">Status</Label>
-              <Select value={status} onValueChange={setStatus}>
-                <SelectTrigger id="status">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {board.columns
-                    .sort((a, b) => a.order - b.order)
-                    .map((column) => (
-                      <SelectItem key={column.id} value={column.id}>
-                        {column.name}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="priority">Priority</Label>
-              <Select value={priority} onValueChange={(value: typeof priority) => setPriority(value)}>
-                <SelectTrigger id="priority">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">Low</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
-                  <SelectItem value="urgent">Urgent</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="storyPoints">Story Points</Label>
+              <Label htmlFor="initial-status">Initial Status</Label>
               <Input
-                id="storyPoints"
+                id="initial-status"
+                value={initialStatus}
+                disabled
+                className="bg-muted"
+              />
+              <p className="text-xs text-muted-foreground">
+                Tasks start with &quot;{initialStatus}&quot;
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="effort">Effort (Story Points/Hours)</Label>
+              <Input
+                id="effort"
                 type="number"
                 min="0"
                 placeholder="e.g., 5"
-                value={storyPoints}
-                onChange={(e) => setStoryPoints(e.target.value ? Number(e.target.value) : "")}
+                value={effort}
+                onChange={(e) => setEffort(e.target.value ? Number(e.target.value) : "")}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="dueDate">Due Date (Optional)</Label>
+              <Input
+                id="dueDate"
+                type="date"
+                value={dueDate}
+                onChange={(e) => setDueDate(e.target.value)}
               />
             </div>
           </div>
+          
+          {/* ❌ Priority field removed - not supported by contract */}
 
           <div className="space-y-2">
             <Label htmlFor="assignee">Assignee (Optional)</Label>

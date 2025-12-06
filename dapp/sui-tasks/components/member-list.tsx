@@ -1,95 +1,72 @@
+/**
+ * ⚠️ MEMBER LIST - NOT SUPPORTED BY CONTRACT
+ * 
+ * The MoveIt smart contract does NOT store a members list in the Board struct.
+ * Instead, it uses a capability-based access control system:
+ * 
+ * 1. AdminCap - Owned by board admin, allows board management
+ * 2. ContributorCap - Given to contributors, allows task operations
+ * 
+ * ContributorCaps are separate objects owned by users, not stored in the board.
+ * There's no on-chain way to query "all members of a board".
+ * 
+ * POSSIBLE SOLUTIONS:
+ * - Use indexer to track ContributorAdded events
+ * - Query owned ContributorCaps for current user
+ * - Store members in off-chain database
+ * 
+ * For now, this component is disabled to prevent errors.
+ */
 "use client"
 
-import { useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { UserPlus, Crown, Shield, User } from "lucide-react"
-import type { Board, Member } from "@/lib/types"
-import { AddMemberForm } from "./add-member-form"
-import { MemberDetail } from "./member-detail"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { InfoIcon } from "lucide-react"
+import type { Board } from "@/lib/types"
 
 interface MemberListProps {
   board: Board
 }
 
-const roleConfig = {
-  owner: { label: "Owner", icon: Crown, variant: "default" as const },
-  admin: { label: "Admin", icon: Shield, variant: "secondary" as const },
-  member: { label: "Member", icon: User, variant: "outline" as const },
-}
-
 export function MemberList({ board }: MemberListProps) {
-  const [showAddForm, setShowAddForm] = useState(false)
-  const [selectedMember, setSelectedMember] = useState<Member | null>(null)
-
-  const members: Member[] = board.members.map((address, index) => ({
-    address,
-    role: index === 0 ? "owner" : index === 1 ? "admin" : "member",
-    joinedAt: Date.now() - 86400000 * (board.members.length - index),
-  }))
-
-  const currentUserAddress = "0x1234...5678" // Mock current user
-  const isOwner = board.owner === currentUserAddress
-
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-semibold">Members</h2>
-          <p className="text-sm text-muted-foreground">{board.members.length} members</p>
-        </div>
-        <Button onClick={() => setShowAddForm(true)} size="sm" className="gap-2">
-          <UserPlus className="h-4 w-4" />
-          Add Member
-        </Button>
-      </div>
+      <Alert>
+        <InfoIcon className="h-4 w-4" />
+        <AlertTitle>Member Management Not Available</AlertTitle>
+        <AlertDescription className="mt-2 space-y-2">
+          <p>
+            The MoveIt smart contract uses a <strong>capability-based access control</strong> system
+            instead of storing a members list.
+          </p>
+          <div className="mt-3 space-y-1 text-sm">
+            <p><strong>How it works:</strong></p>
+            <ul className="list-disc list-inside ml-2 space-y-1">
+              <li><strong>AdminCap</strong> - Allows board management (owned by admin)</li>
+              <li><strong>ContributorCap</strong> - Allows task operations (given to contributors)</li>
+            </ul>
+          </div>
+          <div className="mt-3 space-y-1 text-sm">
+            <p><strong>To add contributors:</strong></p>
+            <ul className="list-disc list-inside ml-2 space-y-1">
+              <li>Use the admin dashboard to call <code className="bg-muted px-1 rounded">add_contributor()</code></li>
+              <li>ContributorCap will be transferred to the new member's wallet</li>
+            </ul>
+          </div>
+          <p className="mt-3 text-sm text-muted-foreground">
+            Board ID: <code className="bg-muted px-1 rounded">{board.id}</code>
+          </p>
+        </AlertDescription>
+      </Alert>
 
-      {showAddForm && <AddMemberForm boardId={board.id} onClose={() => setShowAddForm(false)} />}
-
-      {selectedMember && (
-        <MemberDetail
-          member={selectedMember}
-          isOwner={isOwner}
-          onClose={() => setSelectedMember(null)}
-          onRoleChange={(newRole) => {
-            console.log("[v0] Role changed for", selectedMember.address, "to", newRole)
-            setSelectedMember(null)
-          }}
-          onRemove={() => {
-            console.log("[v0] Member removed:", selectedMember.address)
-            setSelectedMember(null)
-          }}
-        />
-      )}
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {members.map((member) => {
-          const config = roleConfig[member.role]
-          const Icon = config.icon
-
-          return (
-            <Card
-              key={member.address}
-              className="cursor-pointer hover:shadow-md transition-shadow"
-              onClick={() => setSelectedMember(member)}
-            >
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium font-mono">{member.address}</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <Badge variant={config.variant} className="gap-1">
-                  <Icon className="h-3 w-3" />
-                  {config.label}
-                </Badge>
-                <div className="text-xs text-muted-foreground">
-                  Joined {new Date(member.joinedAt).toLocaleDateString()}
-                </div>
-              </CardContent>
-            </Card>
-          )
-        })}
-      </div>
+      {/* 
+      ❌ COMMENTED OUT - Contract doesn't support member list
+      
+      const members: Member[] = board.members?.map((address, index) => ({
+        address,
+        role: index === 0 ? "owner" : index === 1 ? "admin" : "member",
+        joinedAt: Date.now() - 86400000 * (board.members.length - index),
+      })) || []
+      */}
     </div>
   )
 }

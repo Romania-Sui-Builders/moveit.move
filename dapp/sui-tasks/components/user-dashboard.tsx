@@ -28,7 +28,9 @@ export function UserDashboard({ userAddress }: UserDashboardProps) {
     refreshInterval: 3000,
   })
 
-  const userBoards = boards.filter((board: Board) => board.members.includes(userAddress))
+  // ⚠️ Contract doesn't store members list - show all boards for now
+  // TODO: Filter by user's owned ContributorCaps when indexer supports it
+  const userBoards = boards
   const userTasks = tasks.filter((task: Task) => task.assignee === userAddress)
   const showAdminDashboard = isAdmin(userAddress)
 

@@ -1,41 +1,38 @@
 // hooks/useTasks.ts
-import { useCurrentAccount, useSuiClient, useSignAndExecuteTransaction } from '@mysten/dapp-kit';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Transaction } from '@mysten/sui/transactions';
-import { TASK_TYPE, PACKAGE_ID, CLOCK_ID } from '@/core/constants';
-import { parseTask } from '@/utils/sui';
-import { useToast } from './useToast';
-import type { Task, TaskStatus } from '@/types/board';
+import {
+  useSignAndExecuteTransaction,
+  useCurrentAccount,
+} from "@mysten/dapp-kit";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Transaction } from "@mysten/sui/transactions";
+import { bcs } from "@mysten/sui/bcs";
+import { PACKAGE_ID, CLOCK_ID } from "@/core/constants";
+import { useToast } from "./useToast";
 
 export function useTasks(boardId?: string) {
-  const account = useCurrentAccount();
-  const suiClient = useSuiClient();
-
   return useQuery({
-    queryKey: ['tasks', boardId, account?.address],
+    queryKey: ["tasks", boardId],
     queryFn: async () => {
-      if (!account?.address || !boardId) return [];
+      if (!boardId) return [];
 
-      // Note: This would need to be adjusted based on your actual smart contract structure
-      // For now, we'll assume we can fetch tasks by owner or through board relationship
-      const { data } = await suiClient.getOwnedObjects({
-        owner: account.address,
-        filter: { StructType: TASK_TYPE },
-        options: { showContent: true },
-      });
-
-      const tasks = data.map(parseTask);
-      return tasks.filter(task => task.boardId === boardId);
+      const response = await fetch(`/api/boards/${boardId}/tasks`);
+      if (!response.ok) {
+        throw new Error("Failed to fetch tasks");
+      }
+      const data = await response.json();
+      return data.tasks || [];
     },
-    enabled: !!account?.address && !!boardId,
+    enabled: !!boardId,
+    refetchInterval: 3000, // Refresh every 3 seconds
+    refetchOnWindowFocus: true,
   });
 }
 
 interface CreateTaskData {
+  contributorCapId: { id: string };
   title: string;
   description: string;
-  assignee: string;
-  status: TaskStatus;
+  assignee?: string;
   dueDate: number;
   effortHours: number;
 }
@@ -49,45 +46,66 @@ export function useCreateTask(boardId: string) {
   return useMutation({
     mutationFn: async (data: CreateTaskData) => {
       if (!account) {
-        throw new Error('Wallet not connected');
+        throw new Error("Wallet not connected");
       }
 
-      // Note: This needs to be adjusted based on your actual smart contract
-      // You'll need the capability ID to create tasks
+      console.log("Creating task with data:", {
+        contributorCapId: data.contributorCapId,
+        boardId,
+        title: data.title,
+        assignee: data.assignee || account.address,
+      });
+
+      // Create task using MoveIt contract
       const tx = new Transaction();
+
+      // Prepare assignees array - ensure addresses are normalized
+      const assigneeAddress = data.assignee || account.address;
+      const assignees = [assigneeAddress];
+
+      console.log({ data, assignees });
+      
       tx.moveCall({
-        target: `${PACKAGE_ID}::task::create`,
+        target: `${PACKAGE_ID}::moveit::create_task`,
         arguments: [
-          tx.object(boardId),
+          tx.object(data.contributorCapId.id), // ContributorCap (owned object)
+          tx.object(boardId), // Board (shared object)
           tx.pure.string(data.title),
           tx.pure.string(data.description),
-          tx.pure.address(data.assignee || account.address),
-          tx.pure.u8(data.status),
           tx.pure.u64(data.dueDate),
-          tx.pure.u64(data.effortHours),
-          tx.object(CLOCK_ID),
-          // capability object would go here
+          tx.pure.u64(data.effortHours), // effort parameter (story points/hours)
+          tx.pure(bcs.vector(bcs.Address).serialize(assignees).toBytes()), // assignees vector
+          tx.object(CLOCK_ID), // Clock (shared object)
         ],
       });
 
-      return signAndExecute({ transaction: tx });
+      const result = await signAndExecute({ transaction: tx });
+      console.log("Task creation transaction result:", result);
+      return result;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tasks', boardId] });
+      queryClient.invalidateQueries({ queryKey: ["tasks", boardId] });
     },
     onError: (error) => {
       toast(
-        'Failed to create task',
-        error instanceof Error ? error.message : 'Transaction failed',
-        'error'
+        "Failed to create task",
+        error instanceof Error ? error.message : "Transaction failed",
+        "error"
       );
     },
   });
 }
 
 interface UpdateTaskData {
-  taskId: string;
-  updates: Partial<CreateTaskData>;
+  taskObjectId: string; // ✅ Changed: Task Object ID (not task number)
+  boardId: string;
+  contributorCapId: string;
+  updates: {
+    title?: string;
+    description?: string;
+    dueDate?: number;
+    effortHours?: number;
+  };
 }
 
 export function useUpdateTask() {
@@ -97,39 +115,61 @@ export function useUpdateTask() {
   const { toast } = useToast();
 
   return useMutation({
-    mutationFn: async ({ taskId, updates }: UpdateTaskData) => {
+    mutationFn: async ({
+      taskObjectId,
+      boardId,
+      contributorCapId,
+      updates,
+    }: UpdateTaskData) => {
       if (!account) {
-        throw new Error('Wallet not connected');
+        throw new Error("Wallet not connected");
       }
 
-      // Note: This needs to be adjusted based on your actual smart contract
-      // You'll need the capability ID and task object
+      if (!contributorCapId) {
+        throw new Error("Contributor capability required");
+      }
+
+      console.log("🔄 Updating task on blockchain:", {
+        taskObjectId,
+        boardId,
+        contributorCapId,
+        updates,
+      });
+
+      // Update task using MoveIt contract
       const tx = new Transaction();
-      
-      if (updates.status !== undefined) {
-        tx.moveCall({
-          target: `${PACKAGE_ID}::task::update_status`,
-          arguments: [
-            tx.object(taskId),
-            tx.pure.u8(updates.status),
-            // capability object would go here
-            tx.object(CLOCK_ID),
-          ],
-        });
+
+      tx.moveCall({
+        target: `${PACKAGE_ID}::moveit::update_task`,
+        arguments: [
+          tx.object(contributorCapId),
+          tx.object(boardId),
+          tx.object(taskObjectId), // ✅ Task Object ID
+          tx.pure.string(updates.title || ""),
+          tx.pure.string(updates.description || ""),
+          tx.pure.u64(updates.dueDate || 0),
+          tx.pure.u64(updates.effortHours || 0),
+          tx.object(CLOCK_ID),
+        ],
+      });
+
+      try {
+        const result = await signAndExecute({ transaction: tx });
+        console.log("✅ Task update transaction result:", result);
+        return result;
+      } catch (error) {
+        console.error("❌ Task update transaction failed:", error);
+        throw error;
       }
-
-      // Add more update calls for other fields as needed
-
-      return signAndExecute({ transaction: tx });
     },
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
     },
     onError: (error) => {
       toast(
-        'Failed to update task',
-        error instanceof Error ? error.message : 'Transaction failed',
-        'error'
+        "Failed to update task",
+        error instanceof Error ? error.message : "Transaction failed",
+        "error"
       );
     },
   });
