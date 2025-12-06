@@ -121,12 +121,6 @@ public struct ContributorAdded has copy, drop {
     added_by: address,
 }
 
-public struct ContributorRemoved has copy, drop {
-    board_id: ID,
-    contributor: address,
-    removed_by: address,
-}
-
 public struct TaskCreated has copy, drop {
     board_id: ID,
     task_id: u64,
@@ -321,43 +315,27 @@ public fun remove_status(
 }
 
 /// Add a contributor to a board (admin only).
-/// Returns a ContributorCap for the new contributor.
+/// The ContributorCap is transferred directly to the contributor.
 public fun add_contributor(
     _: &AdminCap,
     board: &Board,
     new_contributor: address,
     ctx: &mut TxContext,
-): ContributorCap {
+) {
     assert_current_version(board);
     let sender = ctx.sender();
+    
+    let contributor_cap = ContributorCap {
+        id: object::new(ctx),
+        board_id: object::id(board),
+    };
+    
+    transfer::transfer(contributor_cap, new_contributor);
     
     event::emit(ContributorAdded {
         board_id: object::id(board),
         contributor: new_contributor,
         added_by: sender,
-    });
-    
-    ContributorCap {
-        id: object::new(ctx),
-        board_id: object::id(board),
-    }
-}
-
-/// Emit a removal event (admin only).
-/// The actual ContributorCap must be burned separately by its holder.
-public fun remove_contributor(
-    _: &AdminCap,
-    board: &Board,
-    contributor_to_remove: address,
-    ctx: &TxContext,
-) {
-    assert_current_version(board);
-    let sender = ctx.sender();
-    
-    event::emit(ContributorRemoved {
-        board_id: object::id(board),
-        contributor: contributor_to_remove,
-        removed_by: sender,
     });
 }
 
