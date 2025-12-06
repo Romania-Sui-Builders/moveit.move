@@ -2,8 +2,10 @@
   "name": "indexer-ts",
   "version": "1.0.0",
   "private": true,
-  "main": "server.ts",
+  "main": "dist/server.js",
   "scripts": {
+    "build": "npx prisma generate && npx tsc",
+    "start": "npx prisma migrate deploy && node dist/main.js",
     "db:setup:dev": "npx prisma migrate dev --name init --schema=./prisma/schema.prisma",
     "db:reset:dev": "npx prisma migrate reset --schema=./prisma/schema.prisma",
     "db:studio": "npx prisma studio --schema=./prisma/schema.prisma",
@@ -26,5 +28,8 @@
     "prisma": "^5.16.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }

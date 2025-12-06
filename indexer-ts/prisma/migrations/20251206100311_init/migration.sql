@@ -4,8 +4,20 @@ CREATE TABLE "BoardCreated" (
     "board_id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "created_by" TEXT NOT NULL,
+    "version" TEXT NOT NULL,
 
     CONSTRAINT "BoardCreated_pkey" PRIMARY KEY ("dbId")
+);
+
+-- CreateTable
+CREATE TABLE "BoardMigrated" (
+    "dbId" TEXT NOT NULL,
+    "board_id" TEXT NOT NULL,
+    "old_version" TEXT NOT NULL,
+    "new_version" TEXT NOT NULL,
+    "migrated_by" TEXT NOT NULL,
+
+    CONSTRAINT "BoardMigrated_pkey" PRIMARY KEY ("dbId")
 );
 
 -- CreateTable
@@ -19,13 +31,23 @@ CREATE TABLE "ContributorAdded" (
 );
 
 -- CreateTable
-CREATE TABLE "ContributorRemoved" (
+CREATE TABLE "StatusAdded" (
     "dbId" TEXT NOT NULL,
     "board_id" TEXT NOT NULL,
-    "contributor" TEXT NOT NULL,
+    "status" TEXT NOT NULL,
+    "added_by" TEXT NOT NULL,
+
+    CONSTRAINT "StatusAdded_pkey" PRIMARY KEY ("dbId")
+);
+
+-- CreateTable
+CREATE TABLE "StatusRemoved" (
+    "dbId" TEXT NOT NULL,
+    "board_id" TEXT NOT NULL,
+    "status" TEXT NOT NULL,
     "removed_by" TEXT NOT NULL,
 
-    CONSTRAINT "ContributorRemoved_pkey" PRIMARY KEY ("dbId")
+    CONSTRAINT "StatusRemoved_pkey" PRIMARY KEY ("dbId")
 );
 
 -- CreateTable
@@ -55,8 +77,8 @@ CREATE TABLE "TaskStatusChanged" (
     "dbId" TEXT NOT NULL,
     "board_id" TEXT NOT NULL,
     "task_id" TEXT NOT NULL,
-    "old_status" INTEGER NOT NULL,
-    "new_status" INTEGER NOT NULL,
+    "old_status" TEXT NOT NULL,
+    "new_status" TEXT NOT NULL,
     "changed_by" TEXT NOT NULL,
 
     CONSTRAINT "TaskStatusChanged_pkey" PRIMARY KEY ("dbId")
@@ -85,10 +107,16 @@ CREATE TABLE "cursor" (
 CREATE UNIQUE INDEX "BoardCreated_dbId_key" ON "BoardCreated"("dbId");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "BoardMigrated_dbId_key" ON "BoardMigrated"("dbId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "ContributorAdded_dbId_key" ON "ContributorAdded"("dbId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "ContributorRemoved_dbId_key" ON "ContributorRemoved"("dbId");
+CREATE UNIQUE INDEX "StatusAdded_dbId_key" ON "StatusAdded"("dbId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "StatusRemoved_dbId_key" ON "StatusRemoved"("dbId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "TaskAssigned_dbId_key" ON "TaskAssigned"("dbId");

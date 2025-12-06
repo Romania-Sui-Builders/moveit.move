@@ -15,6 +15,15 @@ model BoardCreated {
   board_id String
   name String
   created_by String
+  version String
+}
+
+model BoardMigrated {
+  dbId String @id @unique @default(uuid())
+  board_id String
+  old_version String
+  new_version String
+  migrated_by String
 }
 
 model ContributorAdded {
@@ -24,10 +33,17 @@ model ContributorAdded {
   added_by String
 }
 
-model ContributorRemoved {
+model StatusAdded {
   dbId String @id @unique @default(uuid())
   board_id String
-  contributor String
+  status String
+  added_by String
+}
+
+model StatusRemoved {
+  dbId String @id @unique @default(uuid())
+  board_id String
+  status String
   removed_by String
 }
 
@@ -51,8 +67,8 @@ model TaskStatusChanged {
   dbId String @id @unique @default(uuid())
   board_id String
   task_id String
-  old_status Int
-  new_status Int
+  old_status String
+  new_status String
   changed_by String
 }
 
