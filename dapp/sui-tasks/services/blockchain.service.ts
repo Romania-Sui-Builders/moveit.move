@@ -10,14 +10,16 @@ export interface BlockchainBoard {
   description: string;
   statuses: string[];
   taskCounter: number;
+  taskIds: string[]; // ✅ Added: Object IDs of all tasks in the board
   createdAt: number;
   version: number;
   owner?: string;
 }
 
 export interface BlockchainTask {
+  id: string; // ✅ Changed: Task Object ID (not task number)
   boardId: string;
-  taskId: number;
+  taskNumber: number; // ✅ Added: Sequential number within board (for display)
   title: string;
   description: string;
   dueDate: number;
@@ -27,8 +29,8 @@ export interface BlockchainTask {
   creator: string;
   createdAt: number;
   updatedAt: number;
-  parentTaskId?: number;
-  subtaskIds: number[];
+  parentTaskId?: string; // ✅ Changed: Object ID (not number)
+  subtaskIds: string[]; // ✅ Changed: Object IDs (not numbers)
 }
 
 /**
@@ -86,6 +88,7 @@ export async function getBoardFromBlockchain(boardId: string): Promise<Blockchai
       description: fields.description || '',
       statuses: fields.statuses || [],
       taskCounter: parseInt(fields.task_counter || '0'),
+      taskIds: fields.task_ids || [], // ✅ Fixed: Include task IDs
       createdAt: parseInt(fields.created_at || '0'),
       version: parseInt(fields.version || '1'),
     };
@@ -180,23 +183,17 @@ export async function getContributorCapsFromBlockchain(address: string): Promise
 }
 
 /**
- * Get detailed task information from a board
+ * Get task by Object ID (tasks are shared objects)
+ * ✅ FIXED: Query task directly by Object ID, not via dynamic fields
  */
-export async function getTaskFromBoard(boardId: string, taskId: number): Promise<BlockchainTask | null> {
+export async function getTaskFromBlockchain(taskObjectId: string): Promise<BlockchainTask | null> {
   try {
-    const board = await getBoardFromBlockchain(boardId);
-    if (!board) return null;
-
-    // Tasks are stored in a Table inside the Board
-    // We need to use dynamic field queries
-    const dynamicFieldName = {
-      type: 'u64',
-      value: taskId.toString(),
-    };
-
-    const object = await suiClient.getDynamicFieldObject({
-      parentId: boardId,
-      name: dynamicFieldName,
+    const object = await suiClient.getObject({
+      id: taskObjectId,
+      options: {
+        showContent: true,
+        showType: true,
+      },
     });
 
     if (!object.data || object.data.content?.dataType !== 'moveObject') {
@@ -204,11 +201,12 @@ export async function getTaskFromBoard(boardId: string, taskId: number): Promise
     }
 
     const content = object.data.content as any;
-    const fields = content.fields.value;
+    const fields = content.fields;
 
     return {
-      boardId,
-      taskId: parseInt(fields.task_id || '0'),
+      id: taskObjectId, // ✅ Object ID, not task_number
+      boardId: fields.board_id,
+      taskNumber: parseInt(fields.task_number || '0'), // ✅ Sequential number for display
       title: fields.title || '',
       description: fields.description || '',
       dueDate: parseInt(fields.due_date || '0'),
@@ -218,12 +216,33 @@ export async function getTaskFromBoard(boardId: string, taskId: number): Promise
       creator: fields.creator || '',
       createdAt: parseInt(fields.created_at || '0'),
       updatedAt: parseInt(fields.updated_at || '0'),
-      parentTaskId: fields.parent_task_id?.vec?.[0],
-      subtaskIds: fields.subtask_ids || [],
+      parentTaskId: fields.parent_task_id?.vec?.[0], // ✅ Object ID
+      subtaskIds: fields.subtask_ids || [], // ✅ Object IDs
     };
   } catch (error) {
-    console.error('Error fetching task from board:', error);
+    console.error('Error fetching task:', error);
     return null;
+  }
+}
+
+/**
+ * Get all tasks for a board by querying task_ids from the board
+ * ✅ NEW: Properly fetch tasks using task Object IDs stored in board.task_ids
+ */
+export async function getTasksForBoard(boardId: string): Promise<BlockchainTask[]> {
+  try {
+    const board = await getBoardFromBlockchain(boardId);
+    if (!board || !board.taskIds || board.taskIds.length === 0) return [];
+
+    // Fetch all tasks in parallel
+    const taskPromises = board.taskIds.map(taskId => getTaskFromBlockchain(taskId));
+    const tasks = await Promise.all(taskPromises);
+    
+    // Filter out null results
+    return tasks.filter((task): task is BlockchainTask => task !== null);
+  } catch (error) {
+    console.error('Error fetching tasks for board:', error);
+    return [];
   }
 }
 
@@ -233,5 +252,6 @@ export const blockchainService = {
   getBoardEventsFromBlockchain,
   getTaskEventsFromBlockchain,
   getContributorCapsFromBlockchain,
-  getTaskFromBoard,
+  getTaskFromBlockchain, // ✅ Updated function name
+  getTasksForBoard, // ✅ New function for fetching all tasks
 };

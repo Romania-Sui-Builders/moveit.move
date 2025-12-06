@@ -57,7 +57,7 @@ export function TaskList({ boardId, tasks: initialTasks, board }: TaskListProps)
       medium: "bg-yellow-500",
       low: "bg-blue-500",
     }
-    return colors[priority]
+    return colors[priority || "low"]
   }
 
   const handleDragStart = (e: React.DragEvent, task: Task) => {

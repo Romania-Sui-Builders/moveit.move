@@ -22,17 +22,25 @@ export interface BoardColumn {
 }
 
 export interface Task {
-  id: string
+  id: string // ✅ Task Object ID (from blockchain)
   boardId: string
+  taskNumber?: number // ✅ Sequential number within board (for display like #123)
   title: string
   description: string
   status: string
-  assignee: string | null
+  assignee: string | null // Legacy field for compatibility
+  assignees?: string[] // ✅ Multiple assignees (from contract)
+  dueDate?: number // ✅ Unix timestamp in milliseconds
+  effort?: number // ✅ Effort estimation (story points or hours)
   creator: string
   createdAt: number
   updatedAt: number
+  parentTaskId?: string // ✅ Parent task Object ID (for subtasks)
+  subtaskIds?: string[] // ✅ Subtask Object IDs
+  commentCount?: number // ✅ Number of comments
+  // Legacy fields for backward compatibility
   storyPoints?: number
-  priority: "low" | "medium" | "high" | "urgent"
+  priority?: "low" | "medium" | "high" | "urgent"
 }
 
 export interface Member {

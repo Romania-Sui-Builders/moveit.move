@@ -77,7 +77,7 @@ export function useCreateTask(boardId: string) {
 }
 
 interface UpdateTaskData {
-  taskId: string;
+  taskObjectId: string; // ✅ Changed: Task Object ID (not task number)
   boardId: string;
   contributorCapId: string;
   updates: {
@@ -95,7 +95,7 @@ export function useUpdateTask() {
   const { toast } = useToast();
 
   return useMutation({
-    mutationFn: async ({ taskId, boardId, contributorCapId, updates }: UpdateTaskData) => {
+    mutationFn: async ({ taskObjectId, boardId, contributorCapId, updates }: UpdateTaskData) => {
       if (!account) {
         throw new Error('Wallet not connected');
       }
@@ -112,7 +112,7 @@ export function useUpdateTask() {
         arguments: [
           tx.object(contributorCapId),
           tx.object(boardId),
-          tx.pure.u64(parseInt(taskId)),
+          tx.object(taskObjectId), // ✅ FIXED: Pass task OBJECT, not task number
           tx.pure.string(updates.title || ''),
           tx.pure.string(updates.description || ''),
           tx.pure.u64(updates.dueDate || 0),
