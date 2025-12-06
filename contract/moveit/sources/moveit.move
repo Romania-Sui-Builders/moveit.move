@@ -30,6 +30,8 @@ const ENotUpgraded: u64 = 8;
 const EInvalidDueDate: u64 = 9;
 const ECannotNestSubtasks: u64 = 11;
 const ETaskBoardMismatch: u64 = 12;
+const ECommentNotFound: u64 = 13;
+const EEmptyComment: u64 = 14;
 
 // ===== One-Time Witness =====
 
@@ -96,6 +98,21 @@ public struct Task has key, store {
     parent_task_id: Option<ID>,
     /// Object IDs of subtasks
     subtask_ids: vector<ID>,
+    /// Counter for generating unique comment keys
+    comment_count: u64,
+}
+
+/// Comment represents a discussion entry on a task.
+/// Stored as dynamic fields on the Task object.
+public struct Comment has store, drop, copy {
+    /// Sequential comment number within the task
+    number: u64,
+    /// Comment content
+    content: String,
+    /// Author address
+    author: address,
+    /// Timestamp when comment was created
+    created_at: u64,
 }
 
 /// Contributor capability - given to team members for a specific board.
@@ -175,6 +192,13 @@ public struct SubtaskCreated has copy, drop {
     subtask_id: ID,
     title: String,
     creator: address,
+}
+
+public struct CommentAdded has copy, drop {
+    task_id: ID,
+    board_id: ID,
+    comment_number: u64,
+    author: address,
 }
 
 // ===== Init Function =====
@@ -483,6 +507,7 @@ public fun create_task(
         updated_at: now,
         parent_task_id: option::none(),
         subtask_ids: vector[],
+        comment_count: 0,
     };
     
     let task_id = object::id(&task);
@@ -640,6 +665,7 @@ public fun create_subtask(
         updated_at: now,
         parent_task_id: option::some(parent_task_oid),
         subtask_ids: vector[],
+        comment_count: 0,
     };
     
     let subtask_id = object::id(&subtask);
@@ -746,6 +772,62 @@ public fun has_subtasks(task: &Task): bool {
 /// Get subtask count for a task
 public fun get_subtask_count(task: &Task): u64 {
     (task.subtask_ids.length() as u64)
+}
+
+// ===== Comment Functions =====
+
+/// Add a comment to a task.
+/// Requires a ContributorCap for the board the task belongs to.
+public fun add_comment(
+    cap: &ContributorCap,
+    task: &mut Task,
+    content: String,
+    clock: &Clock,
+    ctx: &TxContext,
+) {
+    assert!(cap.board_id == task.board_id, EInvalidBoardId);
+    assert!(!content.is_empty(), EEmptyComment);
+    
+    let sender = ctx.sender();
+    let now = clock.timestamp_ms();
+    let comment_number = task.comment_count + 1;
+    
+    let comment = Comment {
+        number: comment_number,
+        content,
+        author: sender,
+        created_at: now,
+    };
+    
+    // Store comment as dynamic field with comment number as key
+    dynamic_field::add(&mut task.id, comment_number, comment);
+    task.comment_count = comment_number;
+    
+    event::emit(CommentAdded {
+        task_id: object::id(task),
+        board_id: task.board_id,
+        comment_number,
+        author: sender,
+    });
+}
+
+/// Get a comment from a task by its number.
+/// Returns the comment content, author, and timestamp.
+public fun get_comment(task: &Task, comment_number: u64): (String, address, u64) {
+    assert!(dynamic_field::exists_(&task.id, comment_number), ECommentNotFound);
+    
+    let comment: &Comment = dynamic_field::borrow(&task.id, comment_number);
+    (comment.content, comment.author, comment.created_at)
+}
+
+/// Get the total number of comments on a task
+public fun get_comment_count(task: &Task): u64 {
+    task.comment_count
+}
+
+/// Check if a task has any comments
+public fun has_comments(task: &Task): bool {
+    task.comment_count > 0
 }
 
 // ===== Internal Helper Functions =====
