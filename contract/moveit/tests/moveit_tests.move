@@ -27,6 +27,8 @@ use moveit::moveit::{
     is_valid_contributor_cap,
     is_valid_status,
     task_exists,
+    current_version,
+    needs_migration,
     create_admin_cap_for_testing,
 };
 use sui::test_scenario::{Self as ts, Scenario};
@@ -85,10 +87,12 @@ fun test_admin_create_board() {
         let board = ts::take_shared<Board>(&scenario);
         
         // Verify board info
-        let (name, description, task_count, _created_at) = get_board_info(&board);
+        let (name, description, task_count, _created_at, version) = get_board_info(&board);
         assert!(name == string::utf8(b"Test Board"));
         assert!(description == string::utf8(b"A test board description"));
         assert!(task_count == 0);
+        assert!(version == current_version());
+        assert!(!needs_migration(&board));
         
         // Verify statuses
         let statuses = get_board_statuses(&board);
@@ -908,7 +912,7 @@ fun test_update_board() {
             string::utf8(b"New Description"),
         );
         
-        let (name, description, _, _) = get_board_info(&board);
+        let (name, description, _, _, _) = get_board_info(&board);
         assert!(name == string::utf8(b"New Name"));
         assert!(description == string::utf8(b"New Description"));
         
