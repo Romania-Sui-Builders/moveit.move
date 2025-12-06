@@ -2,7 +2,7 @@
   "name": "indexer-ts",
   "version": "1.0.0",
   "private": true,
-  "main": "dist/server.js",
+  "main": "dist/main.js",
   "scripts": {
     "build": "npx prisma generate && npx tsc",
     "start": "npx prisma migrate deploy && node dist/main.js",
