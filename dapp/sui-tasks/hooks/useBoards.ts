@@ -1,27 +1,18 @@
 // hooks/useBoards.ts
-import { useCurrentAccount, useSuiClient } from '@mysten/dapp-kit';
 import { useQuery } from '@tanstack/react-query';
-import { BOARD_TYPE } from '@/core/constants';
-import { parseBoard } from '@/utils/sui';
-import type { Board } from '@/types/board';
 
 export function useBoards() {
-  const account = useCurrentAccount();
-  const suiClient = useSuiClient();
-
   return useQuery({
-    queryKey: ['boards', account?.address],
+    queryKey: ['boards'],
     queryFn: async () => {
-      if (!account?.address) return [];
-
-      const { data } = await suiClient.getOwnedObjects({
-        owner: account.address,
-        filter: { StructType: BOARD_TYPE },
-        options: { showContent: true },
-      });
-
-      return data.map(parseBoard);
+      const response = await fetch('/api/boards');
+      if (!response.ok) {
+        throw new Error('Failed to fetch boards');
+      }
+      const data = await response.json();
+      return data.boards || [];
     },
-    enabled: !!account?.address,
+    refetchInterval: 5000, // Refresh every 5 seconds
+    refetchOnWindowFocus: true,
   });
 }

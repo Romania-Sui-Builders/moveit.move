@@ -4,7 +4,6 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ArrowLeft, Settings, Trash2 } from "lucide-react"
-import { mockBoards, mockTasks } from "@/lib/mock-data"
 import { TaskList } from "./task-list"
 import { MemberList } from "./member-list"
 import { BoardSettings } from "./board-settings"
@@ -16,18 +15,42 @@ interface BoardDetailProps {
   boardId: string
 }
 
+const fetcher = async (url: string) => {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error('Failed to fetch');
+  const data = await response.json();
+  return data;
+};
+
 export function BoardDetail({ boardId }: BoardDetailProps) {
   const router = useRouter()
-  const [board, setBoard] = useState(mockBoards.find((b) => b.id === boardId))
   const [showSettings, setShowSettings] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
 
-  const { data: tasks = [] } = useSWR(`/api/tasks?boardId=${boardId}`, {
-    fallbackData: mockTasks.filter((task) => task.boardId === boardId),
-    refreshInterval: 3000,
-  })
+  const { data: boardData, error: boardError, isLoading: boardLoading } = useSWR(
+    `/api/boards/${boardId}`,
+    fetcher,
+    { refreshInterval: 5000 }
+  )
 
-  if (!board) {
+  const { data: tasksData, error: tasksError } = useSWR(
+    `/api/boards/${boardId}/tasks`,
+    fetcher,
+    { refreshInterval: 3000 }
+  )
+
+  const board = boardData?.board
+  const tasks = tasksData?.tasks || []
+
+  if (boardLoading) {
+    return (
+      <div className="text-center py-12">
+        <p className="text-muted-foreground">Loading board...</p>
+      </div>
+    )
+  }
+
+  if (boardError || !board) {
     return (
       <div className="text-center py-12">
         <h2 className="text-2xl font-bold mb-2">Board not found</h2>
@@ -53,8 +76,9 @@ export function BoardDetail({ boardId }: BoardDetailProps) {
     router.push("/")
   }
 
-  const handleUpdate = (updatedBoard: typeof board) => {
-    setBoard(updatedBoard)
+  const handleUpdate = () => {
+    // Board updates happen via blockchain transaction
+    // This will trigger a re-fetch via SWR
     setShowSettings(false)
   }
 

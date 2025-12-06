@@ -3,11 +3,15 @@ export interface Board {
   id: string
   name: string
   description: string
-  owner: string
-  members: string[]
-  taskIds: string[]
+  owner?: string
+  members?: string[]
+  taskIds?: string[]
   createdAt: number
-  columns: BoardColumn[]
+  columns?: BoardColumn[]
+  // MoveIt contract fields
+  statuses?: string[]
+  taskCounter?: number
+  version?: number
 }
 
 export interface BoardColumn {

@@ -31,10 +31,19 @@ export function TaskList({ boardId, tasks: initialTasks, board }: TaskListProps)
     refreshInterval: 3000, // Poll every 3 seconds for real-time updates
   })
 
-  const columns = [...board.columns].sort((a, b) => a.order - b.order)
+  // Convert board statuses to column format
+  const columns = board.statuses 
+    ? board.statuses.map((status: string, index: number) => ({
+        id: status,
+        name: status,
+        order: index,
+      }))
+    : board.columns 
+    ? [...board.columns].sort((a, b) => a.order - b.order)
+    : []
 
   const groupedTasks = columns.reduce(
-    (acc, column) => {
+    (acc: Record<string, Task[]>, column: { id: string; name: string; order: number }) => {
       acc[column.id] = tasks.filter((t) => t.status === column.id)
       return acc
     },
@@ -127,7 +136,7 @@ export function TaskList({ boardId, tasks: initialTasks, board }: TaskListProps)
       {selectedTask && <TaskDetail task={selectedTask} board={board} onClose={() => setSelectedTask(null)} />}
 
       <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(300px, 1fr))` }}>
-        {columns.map((column) => {
+        {columns.map((column: { id: string; name: string; order: number; color?: string }) => {
           const isDropTarget = dragOverColumn === column.id
           return (
             <div
@@ -150,7 +159,7 @@ export function TaskList({ boardId, tasks: initialTasks, board }: TaskListProps)
                   isDropTarget ? "border-primary bg-primary/5" : "border-transparent"
                 }`}
               >
-                {(groupedTasks[column.id] || []).map((task) => (
+                {(groupedTasks[column.id] || []).map((task: Task) => (
                   <Card
                     key={task.id}
                     draggable

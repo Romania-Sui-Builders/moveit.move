@@ -1,16 +1,23 @@
 // hooks/useIndexedTasks.ts
 import useSWR from 'swr';
-import { indexerService } from '@/services/indexer.service';
 
-const fetcher = (boardId: string) => indexerService.getTasksForBoard(boardId);
+const fetcher = async (url: string) => {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error('Failed to fetch tasks');
+  }
+  const data = await response.json();
+  return data.tasks || data || [];
+};
 
 export function useIndexedTasks(boardId?: string) {
   const { data, error, isLoading, mutate } = useSWR(
-    boardId ? ['/api/indexer/tasks', boardId] : null,
-    () => boardId ? fetcher(boardId) : [],
+    boardId ? `/api/boards/${boardId}/tasks` : null,
+    fetcher,
     {
       refreshInterval: 3000, // Refresh every 3 seconds
       revalidateOnFocus: true,
+      dedupingInterval: 2000,
     }
   );
 

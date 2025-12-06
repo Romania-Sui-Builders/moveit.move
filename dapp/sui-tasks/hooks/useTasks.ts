@@ -1,33 +1,26 @@
 // hooks/useTasks.ts
-import { useCurrentAccount, useSuiClient, useSignAndExecuteTransaction } from '@mysten/dapp-kit';
+import { useSignAndExecuteTransaction, useCurrentAccount } from '@mysten/dapp-kit';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Transaction } from '@mysten/sui/transactions';
-import { TASK_TYPE, PACKAGE_ID, CLOCK_ID } from '@/core/constants';
-import { parseTask } from '@/utils/sui';
+import { PACKAGE_ID, CLOCK_ID } from '@/core/constants';
 import { useToast } from './useToast';
-import type { Task, TaskStatus } from '@/types/board';
 
 export function useTasks(boardId?: string) {
-  const account = useCurrentAccount();
-  const suiClient = useSuiClient();
-
   return useQuery({
-    queryKey: ['tasks', boardId, account?.address],
+    queryKey: ['tasks', boardId],
     queryFn: async () => {
-      if (!account?.address || !boardId) return [];
+      if (!boardId) return [];
 
-      // Note: This would need to be adjusted based on your actual smart contract structure
-      // For now, we'll assume we can fetch tasks by owner or through board relationship
-      const { data } = await suiClient.getOwnedObjects({
-        owner: account.address,
-        filter: { StructType: TASK_TYPE },
-        options: { showContent: true },
-      });
-
-      const tasks = data.map(parseTask);
-      return tasks.filter(task => task.boardId === boardId);
+      const response = await fetch(`/api/boards/${boardId}/tasks`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch tasks');
+      }
+      const data = await response.json();
+      return data.tasks || [];
     },
-    enabled: !!account?.address && !!boardId,
+    enabled: !!boardId,
+    refetchInterval: 3000, // Refresh every 3 seconds
+    refetchOnWindowFocus: true,
   });
 }
 
