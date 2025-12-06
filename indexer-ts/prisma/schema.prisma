@@ -59,6 +59,7 @@ model TaskCreated {
   dbId String @id @unique @default(uuid())
   board_id String
   task_id String
+  task_number String
   title String
   creator String
 }
@@ -77,6 +78,23 @@ model TaskUpdated {
   board_id String
   task_id String
   updated_by String
+}
+
+model SubtaskCreated {
+  dbId String @id @unique @default(uuid())
+  board_id String
+  parent_task_id String
+  subtask_id String
+  title String
+  creator String
+}
+
+model CommentAdded {
+  dbId String @id @unique @default(uuid())
+  task_id String
+  board_id String
+  comment_number String
+  author String
 }
 
 

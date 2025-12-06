@@ -104,6 +104,26 @@ app.get('/events/moveit/task-assigned', async (req, res) => {
     }
 });
 
+app.get('/events/moveit/subtask-created', async (req, res) => {
+    try {
+        const events = await prisma.subtaskCreated.findMany();
+        res.json(events);
+    } catch (error) {
+        console.error('Failed to fetch SubtaskCreated:', error);
+        res.status(500).json({ error: 'Failed to fetch events' });
+    }
+});
+
+app.get('/events/moveit/comment-added', async (req, res) => {
+    try {
+        const events = await prisma.commentAdded.findMany();
+        res.json(events);
+    } catch (error) {
+        console.error('Failed to fetch CommentAdded:', error);
+        res.status(500).json({ error: 'Failed to fetch events' });
+    }
+});
+
 const PORT = process.env.PORT || 3000;
 
 async function main() {
