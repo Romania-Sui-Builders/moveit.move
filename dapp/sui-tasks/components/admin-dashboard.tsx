@@ -5,31 +5,32 @@ import { mockBoards, mockTasks } from "@/lib/mock-data"
 import { Users, LayoutDashboard, CheckCircle2, TrendingUp, Clock, AlertCircle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import useSWR from "swr"
+import type { Board, Task } from "@/lib/types"
 
 export function AdminDashboard() {
-  const { data: boards = mockBoards } = useSWR("/api/boards", {
+  const { data: boards = mockBoards } = useSWR<Board[]>("/api/boards", {
     fallbackData: mockBoards,
     refreshInterval: 3000,
   })
 
-  const { data: tasks = mockTasks } = useSWR("/api/tasks", {
+  const { data: tasks = mockTasks } = useSWR<Task[]>("/api/tasks", {
     fallbackData: mockTasks,
     refreshInterval: 3000,
   })
 
   const totalBoards = boards.length
   const totalTasks = tasks.length
-  const completedTasks = tasks.filter((t) => t.status === "done").length
-  const inProgressTasks = tasks.filter((t) => t.status === "in_progress").length
-  const urgentTasks = tasks.filter((t) => t.priority === "urgent").length
+  const completedTasks = tasks.filter((t: Task) => t.status === "done").length
+  const inProgressTasks = tasks.filter((t: Task) => t.status === "in_progress").length
+  const urgentTasks = tasks.filter((t: Task) => t.priority === "urgent").length
 
-  const allMembers = new Set(boards.flatMap((b) => b.members))
+  const allMembers = new Set(boards.flatMap((b: Board) => b.members))
   const totalUsers = allMembers.size
 
-  const totalStoryPoints = tasks.reduce((sum, task) => sum + (task.storyPoints || 0), 0)
+  const totalStoryPoints = tasks.reduce((sum: number, task: Task) => sum + (task.storyPoints || 0), 0)
   const completedStoryPoints = tasks
-    .filter((t) => t.status === "done")
-    .reduce((sum, task) => sum + (task.storyPoints || 0), 0)
+    .filter((t: Task) => t.status === "done")
+    .reduce((sum: number, task: Task) => sum + (task.storyPoints || 0), 0)
 
   return (
     <div className="space-y-6">
@@ -126,9 +127,9 @@ export function AdminDashboard() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {boards.map((board) => {
-                const boardTasks = tasks.filter((t) => t.boardId === board.id)
-                const completed = boardTasks.filter((t) => t.status === "done").length
+              {boards.map((board: Board) => {
+                const boardTasks = tasks.filter((t: Task) => t.boardId === board.id)
+                const completed = boardTasks.filter((t: Task) => t.status === "done").length
                 const progress = boardTasks.length > 0 ? Math.round((completed / boardTasks.length) * 100) : 0
 
                 return (
