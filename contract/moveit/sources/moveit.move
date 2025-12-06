@@ -3,12 +3,19 @@
 /// A decentralized task and project management system built on Sui.
 /// Supports boards with configurable workflows, role-based access control, 
 /// and full task lifecycle management.
+/// 
+/// This contract is upgradeable and uses versioned objects for future-proofing.
 module moveit::moveit;
 
 use std::string::String;
 use sui::event;
 use sui::table::{Self, Table};
 use sui::clock::Clock;
+use sui::package;
+use sui::dynamic_field;
+
+// ===== Version Constants =====
+const VERSION: u64 = 1;
 
 // ===== Error Codes =====
 const EInvalidBoardId: u64 = 0;
@@ -18,19 +25,29 @@ const EStatusAlreadyExists: u64 = 3;
 const EStatusNotFound: u64 = 4;
 const ECannotRemoveLastStatus: u64 = 5;
 const ENoStatusesDefined: u64 = 6;
+const EWrongVersion: u64 = 7;
+const ENotUpgraded: u64 = 8;
+
+// ===== One-Time Witness =====
+
+/// One-time witness for package publishing and upgrades
+public struct MOVEIT has drop {}
 
 // ===== Core Structs =====
 
 /// Admin capability - created once when the package is published.
-/// Only the admin can create boards and manage the system.
+/// Only the admin can create boards, manage the system, and authorize upgrades.
 public struct AdminCap has key, store {
     id: UID,
 }
 
 /// Board represents a workspace for organizing tasks and team members.
 /// Each board has its own configurable workflow (statuses).
+/// Includes version field for upgrade compatibility.
 public struct Board has key, store {
     id: UID,
+    /// Version of the board object (for migration compatibility)
+    version: u64,
     /// Board name
     name: String,
     /// Optional description of the board
@@ -83,6 +100,7 @@ public struct BoardCreated has copy, drop {
     board_id: ID,
     name: String,
     created_by: address,
+    version: u64,
 }
 
 public struct StatusAdded has copy, drop {
@@ -137,15 +155,73 @@ public struct TaskAssigned has copy, drop {
     assigned_by: address,
 }
 
+public struct BoardMigrated has copy, drop {
+    board_id: ID,
+    old_version: u64,
+    new_version: u64,
+    migrated_by: address,
+}
+
 // ===== Init Function =====
 
 /// Called once when the package is published.
 /// Creates the AdminCap and transfers it to the publisher.
-fun init(ctx: &mut TxContext) {
+/// The UpgradeCap is automatically created by Sui and should be kept safe.
+fun init(otw: MOVEIT, ctx: &mut TxContext) {
+    // Claim publisher capability (useful for Display objects)
+    let publisher = package::claim(otw, ctx);
+    transfer::public_transfer(publisher, ctx.sender());
+    
+    // Create admin capability
     let admin_cap = AdminCap {
         id: object::new(ctx),
     };
     transfer::transfer(admin_cap, ctx.sender());
+}
+
+// ===== Version Functions =====
+
+/// Get the current contract version
+public fun current_version(): u64 {
+    VERSION
+}
+
+/// Get a board's version
+public fun get_board_version(board: &Board): u64 {
+    board.version
+}
+
+/// Check if a board needs migration
+public fun needs_migration(board: &Board): bool {
+    board.version < VERSION
+}
+
+/// Migrate a board to the current version (admin only).
+/// This function should be updated in future versions to handle migrations.
+public fun migrate_board(
+    _: &AdminCap,
+    board: &mut Board,
+    ctx: &TxContext,
+) {
+    let old_version = board.version;
+    assert!(old_version < VERSION, ENotUpgraded);
+    
+    // Version 1 -> 2 migration logic would go here
+    // Example: if (old_version == 1) { ... migrate to v2 ... }
+    
+    board.version = VERSION;
+    
+    event::emit(BoardMigrated {
+        board_id: object::id(board),
+        old_version,
+        new_version: VERSION,
+        migrated_by: ctx.sender(),
+    });
+}
+
+/// Assert that a board is at the current version
+fun assert_current_version(board: &Board) {
+    assert!(board.version == VERSION, EWrongVersion);
 }
 
 // ===== Admin Functions (Board Management) =====
@@ -165,6 +241,7 @@ public fun create_board(
     
     let board = Board {
         id: object::new(ctx),
+        version: VERSION,
         name,
         description,
         statuses: initial_statuses,
@@ -179,6 +256,7 @@ public fun create_board(
         board_id,
         name: board.name,
         created_by: sender,
+        version: VERSION,
     });
     
     transfer::share_object(board);
@@ -193,6 +271,7 @@ public fun update_board(
     name: String,
     description: String,
 ) {
+    assert_current_version(board);
     board.name = name;
     board.description = description;
 }
@@ -204,6 +283,7 @@ public fun add_status(
     status: String,
     ctx: &TxContext,
 ) {
+    assert_current_version(board);
     let sender = ctx.sender();
     assert!(!vector_contains_string(&board.statuses, &status), EStatusAlreadyExists);
     
@@ -224,6 +304,7 @@ public fun remove_status(
     status: String,
     ctx: &TxContext,
 ) {
+    assert_current_version(board);
     let sender = ctx.sender();
     assert!(board.statuses.length() > 1, ECannotRemoveLastStatus);
     
@@ -247,6 +328,7 @@ public fun add_contributor(
     new_contributor: address,
     ctx: &mut TxContext,
 ): ContributorCap {
+    assert_current_version(board);
     let sender = ctx.sender();
     
     event::emit(ContributorAdded {
@@ -269,6 +351,7 @@ public fun remove_contributor(
     contributor_to_remove: address,
     ctx: &TxContext,
 ) {
+    assert_current_version(board);
     let sender = ctx.sender();
     
     event::emit(ContributorRemoved {
@@ -282,6 +365,47 @@ public fun remove_contributor(
 public fun burn_contributor_cap(cap: ContributorCap) {
     let ContributorCap { id, board_id: _ } = cap;
     object::delete(id);
+}
+
+// ===== Dynamic Field Extensions =====
+// These functions allow adding custom data to boards without contract upgrades
+
+/// Add a custom field to a board (admin only)
+public fun add_board_field<T: store>(
+    _: &AdminCap,
+    board: &mut Board,
+    key: String,
+    value: T,
+) {
+    dynamic_field::add(&mut board.id, key, value);
+}
+
+/// Get a custom field from a board
+public fun get_board_field<T: store>(board: &Board, key: String): &T {
+    dynamic_field::borrow(&board.id, key)
+}
+
+/// Get a mutable custom field from a board (admin only)
+public fun get_board_field_mut<T: store>(
+    _: &AdminCap,
+    board: &mut Board,
+    key: String,
+): &mut T {
+    dynamic_field::borrow_mut(&mut board.id, key)
+}
+
+/// Remove a custom field from a board (admin only)
+public fun remove_board_field<T: store>(
+    _: &AdminCap,
+    board: &mut Board,
+    key: String,
+): T {
+    dynamic_field::remove(&mut board.id, key)
+}
+
+/// Check if a board has a custom field
+public fun has_board_field(board: &Board, key: String): bool {
+    dynamic_field::exists_(&board.id, key)
 }
 
 // ===== Task Functions (Admin) =====
@@ -298,6 +422,7 @@ public fun create_task_as_admin(
     clock: &Clock,
     ctx: &TxContext,
 ): u64 {
+    assert_current_version(board);
     create_task_internal(board, title, description, due_date, effort, assignees, clock, ctx)
 }
 
@@ -313,6 +438,7 @@ public fun update_task_as_admin(
     clock: &Clock,
     ctx: &TxContext,
 ) {
+    assert_current_version(board);
     update_task_internal(board, task_id, title, description, due_date, effort, clock, ctx);
 }
 
@@ -325,6 +451,7 @@ public fun update_task_status_as_admin(
     clock: &Clock,
     ctx: &TxContext,
 ) {
+    assert_current_version(board);
     update_task_status_internal(board, task_id, new_status, clock, ctx);
 }
 
@@ -337,6 +464,7 @@ public fun assign_task_as_admin(
     clock: &Clock,
     ctx: &TxContext,
 ) {
+    assert_current_version(board);
     assign_task_internal(board, task_id, assignees, clock, ctx);
 }
 
@@ -355,6 +483,7 @@ public fun create_task_as_contributor(
     ctx: &TxContext,
 ): u64 {
     assert!(cap.board_id == object::id(board), EInvalidBoardId);
+    assert_current_version(board);
     create_task_internal(board, title, description, due_date, effort, assignees, clock, ctx)
 }
 
@@ -371,6 +500,7 @@ public fun update_task_as_contributor(
     ctx: &TxContext,
 ) {
     assert!(cap.board_id == object::id(board), EInvalidBoardId);
+    assert_current_version(board);
     update_task_internal(board, task_id, title, description, due_date, effort, clock, ctx);
 }
 
@@ -384,6 +514,7 @@ public fun update_task_status_as_contributor(
     ctx: &TxContext,
 ) {
     assert!(cap.board_id == object::id(board), EInvalidBoardId);
+    assert_current_version(board);
     update_task_status_internal(board, task_id, new_status, clock, ctx);
 }
 
@@ -397,14 +528,15 @@ public fun assign_task_as_contributor(
     ctx: &TxContext,
 ) {
     assert!(cap.board_id == object::id(board), EInvalidBoardId);
+    assert_current_version(board);
     assign_task_internal(board, task_id, assignees, clock, ctx);
 }
 
 // ===== View Functions =====
 
-/// Get board info
-public fun get_board_info(board: &Board): (String, String, u64, u64) {
-    (board.name, board.description, board.task_counter, board.created_at)
+/// Get board info (includes version)
+public fun get_board_info(board: &Board): (String, String, u64, u64, u64) {
+    (board.name, board.description, board.task_counter, board.created_at, board.version)
 }
 
 /// Get the board's configured statuses (workflow)
